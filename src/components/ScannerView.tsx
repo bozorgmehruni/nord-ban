@@ -9,6 +9,7 @@ import {
   XCircle,
   ShieldCheck,
   Square,
+  Power,
 } from 'lucide-react';
 import type { VpnServer, ScanConfig } from '../types/vpn';
 
@@ -18,6 +19,8 @@ interface ScannerViewProps {
   dataSource: 'live-nord-api' | 'curated-snapshot';
   scanConfig: ScanConfig;
   isScanning: boolean;
+  isConnected: boolean;
+  connectedServerId: number;
   scanProgress: { completed: number; total: number } | null;
   lastScanDurationMs: number | null;
   selectedServerId: number;
@@ -25,6 +28,7 @@ interface ScannerViewProps {
   onRunScan: () => void;
   onStopScan: () => void;
   onSelectAndConnect: (server: VpnServer) => void;
+  onDisconnect: () => void;
   onTraceServer: (server: VpnServer) => void;
 }
 
@@ -34,6 +38,8 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
   dataSource,
   scanConfig,
   isScanning,
+  isConnected,
+  connectedServerId,
   scanProgress,
   lastScanDurationMs,
   selectedServerId,
@@ -41,6 +47,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
   onRunScan,
   onStopScan,
   onSelectAndConnect,
+  onDisconnect,
   onTraceServer,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -484,14 +491,25 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => onSelectAndConnect(srv)}
-                          className="min-h-[38px] px-3.5 py-1.5 rounded-lg bg-[#2979FF] hover:bg-[#1E66E5] text-xs font-semibold text-[#F8FAFC] inline-flex items-center gap-1.5 whitespace-nowrap"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          <span>Connect</span>
-                        </button>
+                        {isConnected && srv.id === connectedServerId ? (
+                          <button
+                            type="button"
+                            onClick={onDisconnect}
+                            className="min-h-[38px] px-3.5 py-1.5 rounded-lg bg-[#262a33] border border-[#FF1744]/60 hover:bg-[#FF1744]/10 text-xs font-semibold text-[#FF1744] inline-flex items-center gap-1.5 whitespace-nowrap"
+                          >
+                            <Power className="w-3.5 h-3.5" />
+                            <span>Disconnect</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => onSelectAndConnect(srv)}
+                            className="min-h-[38px] px-3.5 py-1.5 rounded-lg bg-[#2979FF] hover:bg-[#1E66E5] text-xs font-semibold text-[#F8FAFC] inline-flex items-center gap-1.5 whitespace-nowrap"
+                          >
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            <span>Connect</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => setExpandedId(expanded ? null : srv.id)}

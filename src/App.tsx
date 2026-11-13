@@ -516,6 +516,8 @@ export default function App() {
             dataSource={dataSource}
             scanConfig={scanConfig}
             isScanning={isScanning}
+            isConnected={isConnected}
+            connectedServerId={selectedServer.id}
             scanProgress={scanProgress}
             lastScanDurationMs={lastScanDurationMs}
             selectedServerId={selectedServer.id}
@@ -523,6 +525,10 @@ export default function App() {
             onRunScan={runFleetScan}
             onStopScan={stopFleetScan}
             onSelectAndConnect={requestConnectToServer}
+            onDisconnect={() => {
+              setIsConnected(false);
+              appendLog('INFO', 'tunnel_down', `Closed ${tunnelSettings.protocol} SA with ${selectedServer.hostname}`);
+            }}
             onTraceServer={(srv) => {
               setSelectedServerId(srv.id);
               setActiveTab('diagnostics');
@@ -538,6 +544,10 @@ export default function App() {
             isConnected={isConnected}
             onSelectServer={(srv) => setSelectedServerId(srv.id)}
             onConnectServer={requestConnectToServer}
+            onDisconnect={() => {
+              setIsConnected(false);
+              appendLog('INFO', 'tunnel_down', `Closed ${tunnelSettings.protocol} SA with ${selectedServer.hostname}`);
+            }}
             onTraceServer={(srv) => {
               setSelectedServerId(srv.id);
               setActiveTab('diagnostics');

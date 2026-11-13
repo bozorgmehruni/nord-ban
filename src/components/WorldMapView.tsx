@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ShieldCheck, Activity, X } from 'lucide-react';
+import { ShieldCheck, Activity, X, Power } from 'lucide-react';
 import type { VpnServer } from '../types/vpn';
 
 interface WorldMapViewProps {
@@ -8,6 +8,7 @@ interface WorldMapViewProps {
   isConnected: boolean;
   onSelectServer: (server: VpnServer) => void;
   onConnectServer: (server: VpnServer) => void;
+  onDisconnect: () => void;
   onTraceServer: (server: VpnServer) => void;
 }
 
@@ -48,6 +49,7 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
   isConnected,
   onSelectServer,
   onConnectServer,
+  onDisconnect,
   onTraceServer,
 }) => {
   const [activeRegion, setActiveRegion] = useState<string>('All');
@@ -302,14 +304,25 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => onConnectServer(selectedServer)}
-                  className="min-h-[44px] px-3 py-2 rounded-lg bg-[#2979FF] hover:bg-[#1E66E5] text-xs font-semibold text-[#F8FAFC] inline-flex items-center justify-center gap-1.5 obsidian-halo-blue"
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>Connect Relay</span>
-                </button>
+                {isConnected ? (
+                  <button
+                    type="button"
+                    onClick={onDisconnect}
+                    className="min-h-[44px] px-3 py-2 rounded-lg bg-[#262a33] border border-[#FF1744]/60 hover:bg-[#FF1744]/10 text-xs font-semibold text-[#FF1744] inline-flex items-center justify-center gap-1.5"
+                  >
+                    <Power className="w-4 h-4" />
+                    <span>Disconnect</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onConnectServer(selectedServer)}
+                    className="min-h-[44px] px-3 py-2 rounded-lg bg-[#2979FF] hover:bg-[#1E66E5] text-xs font-semibold text-[#F8FAFC] inline-flex items-center justify-center gap-1.5 obsidian-halo-blue"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Connect Relay</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => onTraceServer(selectedServer)}

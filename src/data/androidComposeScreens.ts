@@ -867,6 +867,8 @@ fun ScannerScreen(
     probedCount: Int,
     totalToProbe: Int,
     isScanning: Boolean,
+    isConnected: Boolean,
+    connectedHostname: String?,
     workers: Int,
     timeoutMs: Int,
     probePort: Int,
@@ -879,6 +881,7 @@ fun ScannerScreen(
     onScanAll: () -> Unit,
     onStopScan: () -> Unit,
     onConnectNode: (ProbeResult) -> Unit,
+    onDisconnect: () -> Unit,
     onTraceNode: (ProbeResult) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -921,6 +924,42 @@ fun ScannerScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        if (isConnected && connectedHostname != null) {
+            item {
+                ObsidianCard(
+                    borderColor = ObsidianColors.StatusEmerald.copy(alpha = 0.65f),
+                    containerColor = ObsidianColors.InsetBg
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            SectionOverline("Active VPN Tunnel")
+                            Text(
+                                text = connectedHostname,
+                                color = ObsidianColors.StatusEmerald,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
+                        OutlinedButton(
+                            onClick = onDisconnect,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, ObsidianColors.StatusCrimson.copy(alpha = 0.7f)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = null, tint = ObsidianColors.StatusCrimson, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Disconnect", color = ObsidianColors.StatusCrimson, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+
         // Fleet Telemetry Stats 2x2
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -1222,15 +1261,29 @@ fun ScannerScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Button(
-                        onClick = { onConnectNode(srv) },
-                        modifier = Modifier.weight(1f).height(38.dp),
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = ObsidianColors.PrimaryBlue)
-                    ) {
-                        Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(15.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Connect", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    val isNodeConnected = isConnected && srv.hostname == connectedHostname
+                    if (isNodeConnected) {
+                        OutlinedButton(
+                            onClick = onDisconnect,
+                            modifier = Modifier.weight(1f).height(38.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(1.dp, ObsidianColors.StatusCrimson.copy(alpha = 0.7f))
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = null, tint = ObsidianColors.StatusCrimson, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Disconnect", color = ObsidianColors.StatusCrimson, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    } else {
+                        Button(
+                            onClick = { onConnectNode(srv) },
+                            modifier = Modifier.weight(1f).height(38.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = ObsidianColors.PrimaryBlue)
+                        ) {
+                            Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Connect", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                     OutlinedButton(
                         onClick = { expandedHost = if (expanded) null else srv.hostname },
@@ -1316,6 +1369,7 @@ fun WorldMapScreen(
     isConnected: Boolean,
     onSelectNode: (ProbeResult) -> Unit,
     onConnectNode: (ProbeResult) -> Unit,
+    onDisconnect: () -> Unit,
     onTraceNode: (ProbeResult) -> Unit
 ) {
     var activeRegion by remember { mutableStateOf("All") }
@@ -1486,15 +1540,26 @@ fun WorldMapScreen(
                 }
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button(
-                        onClick = { onConnectNode(selectedNode) },
-                        modifier = Modifier.weight(1f).height(44.dp),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = ObsidianColors.PrimaryBlue)
-                    ) {
-                        Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Connect Relay", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    if (isConnected) {
+                        OutlinedButton(
+                            onClick = onDisconnect,
+                            modifier = Modifier.weight(1f).height(44.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(1.dp, ObsidianColors.StatusCrimson.copy(alpha = 0.7f))
+                        ) {
+                            Text("Disconnect", color = ObsidianColors.StatusCrimson, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    } else {
+                        Button(
+                            onClick = { onConnectNode(selectedNode) },
+                            modifier = Modifier.weight(1f).height(44.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = ObsidianColors.PrimaryBlue)
+                        ) {
+                            Icon(Icons.Filled.Shield, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Connect Relay", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                     OutlinedButton(
                         onClick = { onTraceNode(selectedNode) },
@@ -1550,6 +1615,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -1666,7 +1732,7 @@ fun DiagnosticsScreen(
                 if (trace == null) {
                     ObsidianInsetBox {
                         Text(
-                            "Tap \"Run 4-Stage Trace\" to inspect DNS resolution, UDP 500/4500 probe, IKE_SA_INIT negotiation, and random fake-credential check.",
+                            "Tap 'Run 4-Stage Trace' to inspect DNS resolution, UDP 500/4500 probe, IKE_SA_INIT negotiation, and random fake-credential check.",
                             color = ObsidianColors.TextSecondary,
                             fontSize = 12.sp
                         )

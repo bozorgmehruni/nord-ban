@@ -1393,6 +1393,8 @@ class MainActivity : ComponentActivity() {
                                 probedCount = probedCount,
                                 totalToProbe = totalToProbe,
                                 isScanning = isScanning,
+                                isConnected = isConnected,
+                                connectedHostname = if (isConnected) selectedNode.hostname else null,
                                 workers = workers,
                                 timeoutMs = timeoutMs,
                                 probePort = probePort,
@@ -1412,6 +1414,11 @@ class MainActivity : ComponentActivity() {
                                     selectedHost = it.hostname
                                     connectTarget = it
                                 },
+                                onDisconnect = {
+                                    stopVpnTunnel()
+                                    isConnected = false
+                                    logs.add(0, "[INFO] Disconnected \${selectedNode.hostname}")
+                                },
                                 onTraceNode = {
                                     selectedHost = it.hostname
                                     activeTab = "diagnostics"
@@ -1427,6 +1434,11 @@ class MainActivity : ComponentActivity() {
                                 onConnectNode = {
                                     selectedHost = it.hostname
                                     connectTarget = it
+                                },
+                                onDisconnect = {
+                                    stopVpnTunnel()
+                                    isConnected = false
+                                    logs.add(0, "[INFO] Disconnected \${selectedNode.hostname}")
                                 },
                                 onTraceNode = {
                                     selectedHost = it.hostname
