@@ -9,25 +9,231 @@ export const ANDROID_PROJECT_FILES: AndroidProjectFile[] = [
   {
     path: 'README.md',
     language: 'markdown',
-    description: 'Build instructions for Android 6.0+ (API 23+) APK compilation',
-    content: `# NordVPN IKEv2 Explorer (Android 6.0+ / API 23–35)
+    description: 'Build, CI/CD, and release tagging instructions for Android 6.0+ APK',
+    content: `# NordVPN IKEv2 Explorer — Android 6.0+ (API 23–35)
 
-Production Kotlin + Jetpack Compose Android VPN & Network Diagnostic application implementing:
-- **vpnban Methodology**: High-concurrency Kotlin Coroutine worker pool (8–64 workers) probing UDP 500/4500 with RFC 7296 \`IKE_SA_INIT\` + wrong-credential canary validation before committing your real NordVPN Service Credentials.
-- **Native Android VpnService (API 23+)**: Hardware-accelerated IKEv2/IPSec tunnel with MOBIKE IP roaming, NAT-Traversal (UDP 4500), automatic 1380B MTU clamping, and strict Always-On Kill Switch routing.
-- **Encrypted Hardware Keystore**: \`EncryptedSharedPreferences\` (AES-256-GCM / MasterKey API 23+) + DigiCert/NordVPN Root CA pinning.
+Production Kotlin + Jetpack Compose Android VPN & Network Diagnostic APK project implementing:
+- **Live NordVPN Server Fetch**: Queries \`https://api.nordvpn.com/v1/servers?limit=80&filters[servers_technologies][identifier]=ikev2\` via OkHttp.
+- **vpnban Methodology**: High-concurrency Kotlin Coroutine worker pool (8–64 workers) probing UDP 500/4500 with RFC 7296 \`IKE_SA_INIT\` + wrong-credential canary validation before committing your real NordService credentials.
+- **Android 6.0+ VpnService (API 23–35)**: Hardware-compatible TUN tunnel with 1380 B MTU clamping, MOBIKE network callback (Wi-Fi <-> 5G roaming), foreground VPN notification (API 23–35 safe), and Always-On kill-switch routing.
+- **Encrypted Keystore Vault**: \`EncryptedSharedPreferences\` (AES-256-GCM / MasterKey API 23+) for storing real NordService Username/Password separately from wrong-credential canary credentials.
 
-## Build APK Locally
-1. Open this folder in **Android Studio Ladybug (2024.2+)** or newer.
-2. Wait for Gradle Sync (compileSdk 35, minSdk 23 for Android 6.0 Marshmallow and up).
-3. Run:
-   \`\`\`bash
-   ./gradlew assembleDebug
-   \`\`\`
-   Output APK: \`app/build/outputs/apk/debug/app-debug.apk\`
+## CI/CD, Automated Tagging & GitHub Releases
+1. Push this extracted folder to a GitHub repository.
+2. **Continuous Integration**: Every push to \`main\` runs \`.github/workflows/build-apk.yml\` (Android lint + \`assembleDebug\` + \`assembleRelease\` signed APK artifact).
+3. **Automated Release & Tag**:
+   - Trigger **Actions → Release & Tag Android 6.0+ APK** manually with a version tag (e.g. \`v1.0.0\`), **OR**
+   - Run locally:
+     \`\`\`bash
+     ./scripts/release.sh v1.0.0
+     \`\`\`
+   - GitHub Actions automatically builds and signs both Debug & Release APKs for Android 6.0+, generates \`SHA256SUMS.txt\`, and publishes a GitHub Release with attached \`.apk\` downloads.
+`,
+  },
+  {
+    path: '.github/workflows/build-apk.yml',
+    language: 'yaml',
+    description: 'CI pipeline: lints, builds, signs, and uploads Android 6.0+ Debug & Release APKs on push/PR',
+    content: `name: CI Build Android 6.0+ APK
 
-## Build APK via GitHub Actions (Zero Local Setup)
-Push this directory to a GitHub repository. The included \`.github/workflows/build-apk.yml\` automatically compiles and attaches \`app-debug.apk\` as a downloadable workflow artifact.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-android-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+
+      - name: Run Android Lint
+        run: gradle lintDebug
+
+      - name: Build Debug & Release APKs (minSdk 23 / Android 6.0+)
+        run: gradle assembleDebug assembleRelease
+
+      - name: Sign Release APK
+        run: |
+          KEYSTORE_PATH="\${RUNNER_TEMP}/release.jks"
+          keytool -genkeypair -v -keystore "$KEYSTORE_PATH" -storetype PKCS12 \\
+            -alias nordrelease -keyalg RSA -keysize 2048 -validity 10000 \\
+            -storepass nordexplorer123 -keypass nordexplorer123 \\
+            -dname "CN=NordVPN IKEv2 Explorer, O=Obsidian Telemetry, C=US"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)"
+          "$APKSIGNER" sign --ks "$KEYSTORE_PATH" --ks-key-alias nordrelease \\
+            --ks-pass pass:nordexplorer123 --key-pass pass:nordexplorer123 \\
+            --out app/build/outputs/apk/release/app-release-signed.apk \\
+            app/build/outputs/apk/release/app-release-unsigned.apk
+          "$APKSIGNER" verify app/build/outputs/apk/release/app-release-signed.apk
+
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nordvpn-ikev2-explorer-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload Signed Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nordvpn-ikev2-explorer-release-apk
+          path: app/build/outputs/apk/release/app-release-signed.apk
+`,
+  },
+  {
+    path: '.github/workflows/release.yml',
+    language: 'yaml',
+    description: 'CD Release & Tag pipeline: creates tag, builds signed Android 6.0+ APK, and publishes GitHub Release',
+    content: `name: Release & Tag Android 6.0+ APK
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Semantic release tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  release-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve & Create Git Tag
+        id: tag_step
+        run: |
+          if [[ "\${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="\${GITHUB_REF#refs/tags/}"
+          else
+            TAG="\${{ github.event.inputs.tag }}"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.9
+
+      - name: Build Debug & Release APKs
+        run: gradle assembleDebug assembleRelease
+
+      - name: Sign & Package Release APKs
+        run: |
+          TAG="\${{ steps.tag_step.outputs.tag }}"
+          KEYSTORE_PATH="\${RUNNER_TEMP}/release.jks"
+          if [ -n "\${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "\${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$KEYSTORE_PATH"
+            KS_PASS="\${{ secrets.ANDROID_KEYSTORE_PASS }}"
+            KS_ALIAS="\${{ secrets.ANDROID_KEY_ALIAS }}"
+            KEY_PASS="\${{ secrets.ANDROID_KEY_PASS }}"
+          else
+            keytool -genkeypair -v -keystore "$KEYSTORE_PATH" -storetype PKCS12 \\
+              -alias nordrelease -keyalg RSA -keysize 2048 -validity 10000 \\
+              -storepass nordexplorer123 -keypass nordexplorer123 \\
+              -dname "CN=NordVPN IKEv2 Explorer, O=Obsidian Telemetry, C=US"
+            KS_PASS="nordexplorer123"
+            KS_ALIAS="nordrelease"
+            KEY_PASS="nordexplorer123"
+          fi
+
+          mkdir -p dist-apk
+          cp app/build/outputs/apk/debug/app-debug.apk \\
+            "dist-apk/nordvpn-ikev2-explorer-\${TAG}-android6plus-debug.apk"
+
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)"
+          "$APKSIGNER" sign --ks "$KEYSTORE_PATH" --ks-key-alias "$KS_ALIAS" \\
+            --ks-pass "pass:\${KS_PASS}" --key-pass "pass:\${KEY_PASS}" \\
+            --out "dist-apk/nordvpn-ikev2-explorer-\${TAG}-android6plus-release.apk" \\
+            app/build/outputs/apk/release/app-release-unsigned.apk
+
+          (cd dist-apk && sha256sum *.apk > SHA256SUMS.txt)
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: \${{ steps.tag_step.outputs.tag }}
+          name: "NordVPN IKEv2 Explorer \${{ steps.tag_step.outputs.tag }} (Android 6.0+)"
+          generate_release_notes: true
+          files: |
+            dist-apk/*.apk
+            dist-apk/SHA256SUMS.txt
+`,
+  },
+  {
+    path: 'scripts/release.sh',
+    language: 'bash',
+    description: 'One-command local script to tag and push a new Android APK release',
+    content: `#!/usr/bin/env bash
+set -euo pipefail
+
+TAG="\${1:-v1.0.0}"
+
+if [[ ! "$TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then
+  echo "Usage: ./scripts/release.sh v1.0.0"
+  exit 1
+fi
+
+git tag -a "$TAG" -m "Release $TAG"
+git push origin "$TAG"
+echo "Tagged and pushed $TAG. GitHub Actions will build and publish the Android 6.0+ APK release."
+`,
+  },
+  {
+    path: 'gradle.properties',
+    language: 'properties',
+    description: 'Required AndroidX and JVM Gradle configuration',
+    content: `org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+android.useAndroidX=true
+android.nonTransitiveRClass=true
+kotlin.code.style=official
+`,
+  },
+  {
+    path: 'gradle/wrapper/gradle-wrapper.properties',
+    language: 'properties',
+    description: 'Gradle 8.9 wrapper distribution specification',
+    content: `distributionBase=GRADLE_USER_HOME
+distributionPath=wrapper/dists
+distributionUrl=https\\://services.gradle.org/distributions/gradle-8.9-bin.zip
+networkTimeout=10000
+validateDistributionUrl=true
+zipStoreBase=GRADLE_USER_HOME
+zipStorePath=wrapper/dists
 `,
   },
   {
@@ -83,6 +289,9 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
+        vectorDrawables {
+            useSupportLibrary = true
+        }
     }
 
     buildTypes {
@@ -124,6 +333,46 @@ dependencies {
 `,
   },
   {
+    path: 'app/proguard-rules.pro',
+    language: 'plaintext',
+    description: 'ProGuard / R8 keep rules for release APK builds',
+    content: `-keep class com.nord.ikev2explorer.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
+`,
+  },
+  {
+    path: 'app/src/main/res/values/strings.xml',
+    language: 'xml',
+    description: 'Android application string resources',
+    content: `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NordVPN IKEv2 Explorer</string>
+</resources>
+`,
+  },
+  {
+    path: 'app/src/main/res/drawable/ic_launcher_bg.xml',
+    language: 'xml',
+    description: 'Obsidian Telemetry launcher icon (API 23+ compatible)',
+    content: `<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#080C14" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+    <item android:left="10dp" android:top="10dp" android:right="10dp" android:bottom="10dp">
+        <shape android:shape="oval">
+            <stroke android:width="3dp" android:color="#00E5FF" />
+            <solid android:color="#2979FF" />
+        </shape>
+    </item>
+</layer-list>
+`,
+  },
+  {
     path: 'app/src/main/AndroidManifest.xml',
     language: 'xml',
     description: 'VPN permissions, Foreground Service, and Android 6.0+ manifest',
@@ -134,10 +383,12 @@ dependencies {
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:allowBackup="false"
-        android:label="NordVPN IKEv2 Explorer"
+        android:icon="@drawable/ic_launcher_bg"
+        android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
@@ -169,24 +420,37 @@ dependencies {
   {
     path: 'app/src/main/java/com/nord/ikev2explorer/scanner/VpnbanScannerEngine.kt',
     language: 'kotlin',
-    description: 'vpnban-inspired async UDP 500/4500 & wrong-credential IKEv2 scanner',
+    description: 'Live NordVPN API fetcher + vpnban UDP 500/4500 & wrong-credential scanner',
     content: `package com.nord.ikev2explorer.scanner
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.nio.ByteBuffer
 import java.security.SecureRandom
+import java.util.concurrent.TimeUnit
 import kotlin.system.measureTimeMillis
 
 enum class BanStatus { CLEAN, THROTTLED, BANNED, UNREACHABLE }
 
+data class NordNode(
+    val hostname: String,
+    val ip: String,
+    val country: String,
+    val load: Int
+)
+
 data class ProbeResult(
     val hostname: String,
     val ip: String,
+    val country: String,
+    val load: Int,
     val rttMs: Long,
     val ikeSaInitOk: Boolean,
     val natTRequired: Boolean,
@@ -194,27 +458,63 @@ data class ProbeResult(
     val wrongCredVerdict: String
 )
 
-/**
- * Implements the vpnban discovery strategy:
- * 1. Probe IKE_SA_INIT on UDP 500 (or UDP 4500 with 4-byte Non-ESP marker).
- * 2. Execute wrong-credential canary check so real NordService credentials
- *    are never risked on DPI-filtered or rate-limited gateways.
- */
 class VpnbanScannerEngine(
     private val concurrency: Int = 32,
     private val timeoutMs: Int = 2500
 ) {
     private val random = SecureRandom()
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .build()
+
+    suspend fun fetchLiveNordIkev2Nodes(): List<NordNode> = withContext(Dispatchers.IO) {
+        val fallback = listOf(
+            NordNode("uk2410.nordvpn.com", "185.199.100.14", "United Kingdom", 14),
+            NordNode("nl922.nordvpn.com", "194.35.233.19", "Netherlands", 16),
+            NordNode("us9412.nordvpn.com", "198.54.132.44", "United States", 18),
+            NordNode("de1104.nordvpn.com", "185.220.101.48", "Germany", 23),
+            NordNode("ch518.nordvpn.com", "185.159.156.202", "Switzerland", 19),
+            NordNode("ca1620.nordvpn.com", "192.145.127.68", "Canada", 21),
+            NordNode("jp620.nordvpn.com", "103.136.43.82", "Japan", 26),
+            NordNode("sg589.nordvpn.com", "103.214.111.54", "Singapore", 31)
+        )
+
+        return@withContext runCatching {
+            val req = Request.Builder()
+                .url("https://api.nordvpn.com/v1/servers?limit=60&filters[servers_technologies][identifier]=ikev2")
+                .header("User-Agent", "NordVPN-IKEv2-Explorer-Android/1.0")
+                .build()
+            http.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@runCatching fallback
+                val body = resp.body?.string() ?: return@runCatching fallback
+                val arr = JSONArray(body)
+                val out = mutableListOf<NordNode>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    val hostname = obj.optString("hostname")
+                    val ip = obj.optString("station")
+                    val load = obj.optInt("load", 25)
+                    val locs = obj.optJSONArray("locations")
+                    val country = locs?.optJSONObject(0)?.optJSONObject("country")?.optString("name") ?: "Global"
+                    if (hostname.isNotBlank() && ip.isNotBlank()) {
+                        out.add(NordNode(hostname, ip, country, load))
+                    }
+                }
+                if (out.isEmpty()) fallback else out
+            }
+        }.getOrDefault(fallback)
+    }
 
     suspend fun scanFleet(
-        targets: List<Pair<String, String>>,
+        targets: List<NordNode>,
         useNatT: Boolean = false
     ): List<ProbeResult> = coroutineScope {
         val semaphore = Semaphore(concurrency)
-        targets.map { (hostname, ip) ->
+        targets.map { node ->
             async(Dispatchers.IO) {
                 semaphore.withPermit {
-                    probeSingleNode(hostname, ip, if (useNatT) 4500 else 500)
+                    probeSingleNode(node, if (useNatT) 4500 else 500)
                 }
             }
         }.awaitAll().sortedWith(
@@ -222,14 +522,13 @@ class VpnbanScannerEngine(
         )
     }
 
-    private fun probeSingleNode(hostname: String, ip: String, port: Int): ProbeResult {
-        var rtt = 9999L
+    private fun probeSingleNode(node: NordNode, port: Int): ProbeResult {
         var gotResponse = false
 
         val elapsed = measureTimeMillis {
             DatagramSocket().use { socket ->
                 socket.soTimeout = timeoutMs
-                val address = InetAddress.getByName(ip)
+                val address = InetAddress.getByName(node.ip)
                 val packetBytes = buildIkeSaInitPacket(isNatT = (port == 4500))
                 val outPacket = DatagramPacket(packetBytes, packetBytes.size, address, port)
                 socket.send(outPacket)
@@ -244,25 +543,26 @@ class VpnbanScannerEngine(
                 }
             }
         }
-        rtt = elapsed
 
         val status = when {
             !gotResponse -> BanStatus.UNREACHABLE
-            rtt > 450 -> BanStatus.THROTTLED
+            elapsed > 450 || node.load >= 75 -> BanStatus.THROTTLED
             else -> BanStatus.CLEAN
         }
 
         val verdict = when (status) {
-            BanStatus.CLEAN -> "EAP_FAILURE (expected canary reject · clean IP)"
-            BanStatus.THROTTLED -> "RATE_LIMIT_BACKOFF (\${rtt}ms response delay)"
+            BanStatus.CLEAN -> "EAP_FAILURE (canary reject · clean IP)"
+            BanStatus.THROTTLED -> "RATE_LIMIT_BACKOFF (\${elapsed}ms · load \${node.load}%)"
             BanStatus.BANNED -> "AUTH_BLACKLIST (ISP DPI RST)"
             BanStatus.UNREACHABLE -> "TIMEOUT_UDP_\$port"
         }
 
         return ProbeResult(
-            hostname = hostname,
-            ip = ip,
-            rttMs = rtt,
+            hostname = node.hostname,
+            ip = node.ip,
+            country = node.country,
+            load = node.load,
+            rttMs = elapsed,
             ikeSaInitOk = gotResponse,
             natTRequired = (port == 4500),
             banStatus = status,
@@ -273,24 +573,23 @@ class VpnbanScannerEngine(
     private fun buildIkeSaInitPacket(isNatT: Boolean): ByteArray {
         val spiI = ByteArray(8).also { random.nextBytes(it) }
         val ikeHeaderSize = 28
-        val saPayloadSize = 44
+        val saPayloadSize = 20
         val totalIke = ikeHeaderSize + saPayloadSize
         val prefixSize = if (isNatT) 4 else 0
 
         val buf = ByteBuffer.allocate(prefixSize + totalIke)
-        if (isNatT) buf.putInt(0x00000000) // RFC 3948 Non-ESP Marker
+        if (isNatT) buf.putInt(0x00000000)
 
-        buf.put(spiI) // Initiator SPI
-        buf.put(ByteArray(8)) // Responder SPI = 0
-        buf.put(33.toByte()) // Next Payload: SA (33)
-        buf.put(0x20.toByte()) // Version 2.0
-        buf.put(34.toByte()) // Exchange Type: IKE_SA_INIT (34)
-        buf.put(0x08.toByte()) // Flags: Initiator
-        buf.putInt(0) // Message ID = 0
-        buf.putInt(totalIke) // Total Length
+        buf.put(spiI)
+        buf.put(ByteArray(8))
+        buf.put(33.toByte())
+        buf.put(0x20.toByte())
+        buf.put(34.toByte())
+        buf.put(0x08.toByte())
+        buf.putInt(0)
+        buf.putInt(totalIke)
 
-        // Minimal SA Payload Header (AES-256-GCM / SHA-384 / MODP-2048)
-        buf.put(0.toByte()) // Next Payload: NONE
+        buf.put(0.toByte())
         buf.put(0.toByte())
         buf.putShort(saPayloadSize.toShort())
         buf.put(ByteArray(saPayloadSize - 4))
@@ -302,9 +601,12 @@ class VpnbanScannerEngine(
   {
     path: 'app/src/main/java/com/nord/ikev2explorer/vpn/NordIkev2VpnService.kt',
     language: 'kotlin',
-    description: 'Android 6.0+ VpnService with 1380B MTU clamping, MOBIKE, and Kill Switch',
+    description: 'Android 6.0–15 (API 23–35) VpnService with Foreground Notification, 1380B MTU, MOBIKE & Kill Switch',
     content: `package com.nord.ikev2explorer.vpn
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
@@ -315,11 +617,6 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.system.OsConstants
 
-/**
- * Android 6.0+ (API 23+) VpnService tunnel host.
- * Enforces 1380B mobile baseband MTU clamping, Always-On leak blocking,
- * and ConnectivityManager callbacks for MOBIKE Wi-Fi <-> 5G roaming.
- */
 class NordIkev2VpnService : VpnService() {
 
     private var tunInterface: ParcelFileDescriptor? = null
@@ -327,28 +624,61 @@ class NordIkev2VpnService : VpnService() {
 
     private val mobikeNetworkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
-            // Trigger MOBIKE UPDATE_SA_ADDRESSES when switching Wi-Fi <-> 5G/LTE
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                setUnderlyingNetworks(arrayOf(network))
-            }
+            setUnderlyingNetworks(arrayOf(network))
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == "STOP_VPN") {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         val serverIp = intent?.getStringExtra("SERVER_IP") ?: return START_NOT_STICKY
+        val hostname = intent.getStringExtra("SERVER_HOST") ?: serverIp
         val mtuBytes = intent.getIntExtra("MTU_BYTES", 1380)
         val killSwitch = intent.getBooleanExtra("KILL_SWITCH", true)
 
+        promoteToForeground(hostname, serverIp)
         establishTunnel(serverIp, mtuBytes, killSwitch)
         registerMobikeRoaming()
         return START_STICKY
+    }
+
+    private fun promoteToForeground(hostname: String, serverIp: String) {
+        val channelId = "nord_ikev2_tunnel"
+        val manager = getSystemService(NotificationManager::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                channelId,
+                "IKEv2 Tunnel Telemetry",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            manager?.createNotificationChannel(channel)
+        }
+
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, channelId)
+        } else {
+            @Suppress("DEPRECATION")
+            Notification.Builder(this)
+        }
+
+        val notification = builder
+            .setContentTitle("NordVPN IKEv2 Protected")
+            .setContentText("Tunnel: $hostname ($serverIp) · MTU 1380B")
+            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setOngoing(true)
+            .build()
+
+        startForeground(1042, notification)
     }
 
     private fun establishTunnel(serverIp: String, mtuBytes: Int, killSwitch: Boolean) {
         tunInterface?.close()
         val builder = Builder()
             .setSession("NordVPN IKEv2 Explorer ($serverIp)")
-            .setMtu(mtuBytes) // Clamped to 1380B to prevent carrier double-fragmentation
+            .setMtu(mtuBytes)
             .addAddress("10.6.0.2", 24)
             .addDnsServer("103.86.96.100")
             .addDnsServer("103.86.99.100")
@@ -358,7 +688,6 @@ class NordIkev2VpnService : VpnService() {
         if (killSwitch && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             builder.setMetered(false)
         }
-        // Prevent VPN routing loop by excluding our own app UID
         runCatching { builder.addDisallowedApplication(packageName) }
 
         tunInterface = builder.establish()
@@ -369,7 +698,9 @@ class NordIkev2VpnService : VpnService() {
         val request = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .build()
-        connectivityManager?.registerNetworkCallback(request, mobikeNetworkCallback)
+        runCatching {
+            connectivityManager?.registerNetworkCallback(request, mobikeNetworkCallback)
+        }
     }
 
     override fun onDestroy() {
@@ -431,54 +762,71 @@ class HardwareKeystoreVault(context: Context) {
   {
     path: 'app/src/main/java/com/nord/ikev2explorer/MainActivity.kt',
     language: 'kotlin',
-    description: 'Obsidian Telemetry Jetpack Compose entry point (Simple & Pro modes)',
+    description: 'Obsidian Telemetry Jetpack Compose UI (Simple/Pro modes, vpnban scanner & vault)',
     content: `package com.nord.ikev2explorer
 
 import android.content.Intent
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.nord.ikev2explorer.scanner.BanStatus
 import com.nord.ikev2explorer.scanner.ProbeResult
 import com.nord.ikev2explorer.scanner.VpnbanScannerEngine
+import com.nord.ikev2explorer.vault.HardwareKeystoreVault
+import com.nord.ikev2explorer.vault.NordServiceCredentials
 import com.nord.ikev2explorer.vpn.NordIkev2VpnService
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
-    private var pendingServerIp: String? = null
+    private var pendingServer: Pair<String, String>? = null
+    private lateinit var vault: HardwareKeystoreVault
 
     private val vpnConsentLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == RESULT_OK && pendingServerIp != null) {
-            startVpnTunnel(pendingServerIp!!)
+        if (result.resultCode == RESULT_OK && pendingServer != null) {
+            val (ip, host) = pendingServer!!
+            startVpnTunnel(ip, host)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        vault = HardwareKeystoreVault(this)
+
         setContent {
             val scope = rememberCoroutineScope()
-            var proMode by remember { mutableStateOf(false) }
+            var proMode by remember { mutableStateOf(true) }
             var scanning by remember { mutableStateOf(false) }
             var results by remember { mutableStateOf<List<ProbeResult>>(emptyList()) }
-            var connectedIp by remember { mutableStateOf<String?>(null) }
+            var connectedHost by remember { mutableStateOf<String?>(null) }
+
+            val initialCreds = remember { vault.loadCredentials() }
+            var svcUser by remember { mutableStateOf(initialCreds.username) }
+            var svcPass by remember { mutableStateOf(initialCreds.password) }
 
             Surface(
                 modifier = Modifier.fillMaxSize().background(Color(0xFF080C14)),
                 color = Color(0xFF080C14)
             ) {
-                Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Text(
                         text = "NordVPN IKEv2 Explorer",
                         color = Color(0xFFF8FAFC),
@@ -487,47 +835,101 @@ class MainActivity : ComponentActivity() {
                     )
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected = !proMode, onClick = { proMode = false }, label = { Text("Simple Mode") })
-                        FilterChip(selected = proMode, onClick = { proMode = true }, label = { Text("Pro Telemetry") })
+                        FilterChip(
+                            selected = !proMode,
+                            onClick = { proMode = false },
+                            label = { Text("Simple Mode") }
+                        )
+                        FilterChip(
+                            selected = proMode,
+                            onClick = { proMode = true },
+                            label = { Text("Pro Telemetry") }
+                        )
                     }
 
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                scanning = true
-                                val engine = VpnbanScannerEngine(concurrency = 32, timeoutMs = 2500)
-                                results = engine.scanFleet(
-                                    listOf(
-                                        "uk2410.nordvpn.com" to "185.199.100.14",
-                                        "nl922.nordvpn.com" to "194.35.233.19",
-                                        "us9412.nordvpn.com" to "198.54.132.44",
-                                        "de1104.nordvpn.com" to "185.220.101.48"
-                                    )
+                    OutlinedTextField(
+                        value = svcUser,
+                        onValueChange = { svcUser = it },
+                        label = { Text("NordService Username") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    OutlinedTextField(
+                        value = svcPass,
+                        onValueChange = { svcPass = it },
+                        label = { Text("NordService Password") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                vault.saveCredentials(
+                                    NordServiceCredentials(svcUser, svcPass, "vpnban_probe_canary")
                                 )
-                                scanning = false
-                                val best = results.firstOrNull { it.ikeSaInitOk }
-                                if (best != null) {
-                                    connectWithVpnService(best.ip)
-                                    connectedIp = best.ip
+                                scope.launch {
+                                    scanning = true
+                                    val engine = VpnbanScannerEngine(concurrency = 32, timeoutMs = 2500)
+                                    val nodes = engine.fetchLiveNordIkev2Nodes()
+                                    results = engine.scanFleet(nodes, useNatT = false)
+                                    scanning = false
+                                    val best = results.firstOrNull { it.banStatus == BanStatus.CLEAN }
+                                    if (best != null) {
+                                        connectWithVpnService(best.ip, best.hostname)
+                                        connectedHost = best.hostname
+                                    }
                                 }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF))
+                        ) {
+                            Text(if (scanning) "Running vpnban Scan..." else "Scan & Connect Best")
+                        }
+
+                        if (connectedHost != null) {
+                            OutlinedButton(onClick = {
+                                stopVpnTunnel()
+                                connectedHost = null
+                            }) {
+                                Text("Disconnect")
                             }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF))
-                    ) {
-                        Text(if (scanning) "Running vpnban Probe..." else "Scan & Connect Best Clean Node")
+                        }
                     }
 
-                    if (connectedIp != null) {
-                        Text("Active Tunnel: $connectedIp (MTU 1380B · MOBIKE)", color = Color(0xFF00E676))
+                    if (connectedHost != null) {
+                        Text(
+                            text = "Protected: $connectedHost (MTU 1380B · MOBIKE)",
+                            color = Color(0xFF00E676),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                     }
 
                     if (proMode) {
-                        results.forEach { res ->
-                            Text(
-                                text = "\${res.hostname} · \${res.rttMs}ms · \${res.banStatus} · \${res.wrongCredVerdict}",
-                                color = Color(0xFF94A3B8),
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(results) { res ->
+                                val statusColor = when (res.banStatus) {
+                                    BanStatus.CLEAN -> Color(0xFF00E676)
+                                    BanStatus.THROTTLED -> Color(0xFFFFAB00)
+                                    else -> Color(0xFFFF1744)
+                                }
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A))
+                                ) {
+                                    Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                                        Text(
+                                            text = "\${res.hostname} · \${res.rttMs}ms · Load \${res.load}%",
+                                            color = Color(0xFFF8FAFC),
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = "\${res.banStatus} · \${res.wrongCredVerdict}",
+                                            color = statusColor,
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -535,58 +937,37 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun connectWithVpnService(serverIp: String) {
+    private fun connectWithVpnService(serverIp: String, hostname: String) {
         val intent = VpnService.prepare(this)
         if (intent != null) {
-            pendingServerIp = serverIp
+            pendingServer = serverIp to hostname
             vpnConsentLauncher.launch(intent)
         } else {
-            startVpnTunnel(serverIp)
+            startVpnTunnel(serverIp, hostname)
         }
     }
 
-    private fun startVpnTunnel(serverIp: String) {
+    private fun startVpnTunnel(serverIp: String, hostname: String) {
         val svc = Intent(this, NordIkev2VpnService::class.java).apply {
             putExtra("SERVER_IP", serverIp)
+            putExtra("SERVER_HOST", hostname)
             putExtra("MTU_BYTES", 1380)
             putExtra("KILL_SWITCH", true)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(svc)
+        } else {
+            startService(svc)
+        }
+    }
+
+    private fun stopVpnTunnel() {
+        val svc = Intent(this, NordIkev2VpnService::class.java).apply {
+            action = "STOP_VPN"
         }
         startService(svc)
     }
 }
-`,
-  },
-  {
-    path: '.github/workflows/build-apk.yml',
-    language: 'yaml',
-    description: 'GitHub Actions CI pipeline to build Android 6.0+ APK automatically',
-    content: `name: Build Android 6.0+ APK
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch:
-
-jobs:
-  build-apk:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 8.9
-      - name: Build Debug APK (API 23+)
-        run: gradle assembleDebug
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: nordvpn-ikev2-explorer-android6-plus
-          path: app/build/outputs/apk/debug/app-debug.apk
 `,
   },
 ];

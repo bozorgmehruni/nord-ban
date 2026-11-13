@@ -9,6 +9,7 @@ import {
   Check,
   Smartphone,
   Lock,
+  Tag,
 } from 'lucide-react';
 import { ANDROID_PROJECT_FILES } from '../data/androidProjectTemplate';
 import type { TunnelSettings, VaultCredentials } from '../types/vpn';
@@ -32,8 +33,11 @@ export const VaultAndApkView: React.FC<VaultAndApkViewProps> = ({
   const [savedNotice, setSavedNotice] = useState(false);
   const [selectedFileIndex, setSelectedFileIndex] = useState(0);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
+  const [releaseTag, setReleaseTag] = useState('v1.0.0');
+  const [copiedCmd, setCopiedCmd] = useState(false);
 
   const activeFile = ANDROID_PROJECT_FILES[selectedFileIndex] ?? ANDROID_PROJECT_FILES[0];
+  const releaseCommand = `git init && git add . && git commit -m "Release ${releaseTag}" && git tag -a ${releaseTag} -m "NordVPN IKEv2 Explorer ${releaseTag}" && git push -u origin main --tags`;
 
   const handleSaveVault = (e: React.FormEvent) => {
     e.preventDefault();
@@ -298,6 +302,64 @@ export const VaultAndApkView: React.FC<VaultAndApkViewProps> = ({
             <Download className="w-4 h-4" />
             <span>Download Android 6.0+ Project (.zip)</span>
           </a>
+        </div>
+
+        {/* CI/CD Automated Release & Tag Command Strip */}
+        <div className="rounded-xl border border-white/10 bg-[#0D1321] p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Tag className="w-4 h-4 text-[#00E5FF]" />
+              <span className="text-xs font-semibold text-[#F8FAFC]">
+                CI/CD Auto-Release & Tag Pipeline (.github/workflows/release.yml)
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="release-tag-input" className="text-xs text-[#94A3B8]">
+                Version Tag:
+              </label>
+              <input
+                id="release-tag-input"
+                type="text"
+                value={releaseTag}
+                onChange={(e) => setReleaseTag(e.target.value)}
+                className="w-28 h-8 px-2.5 rounded bg-[#080C14] border border-[#334155] font-mono text-xs text-[#00E5FF] focus:outline-none focus:border-[#00E5FF]"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-white/5 bg-[#080C14] px-3.5 py-2.5">
+            <code className="font-mono text-[11px] text-[#DFE2EE] overflow-x-auto whitespace-nowrap">
+              {releaseCommand}
+            </code>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(releaseCommand);
+                  setCopiedCmd(true);
+                  setTimeout(() => setCopiedCmd(false), 1800);
+                } catch {
+                  // ignore clipboard restrictions
+                }
+              }}
+              className="px-2.5 py-1 rounded bg-[#1E293B] border border-white/10 text-xs text-[#F8FAFC] hover:border-[#00E5FF]/50 inline-flex items-center gap-1.5 shrink-0"
+            >
+              {copiedCmd ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-[#00E676]" />
+                  <span>Copied</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>Copy Command</span>
+                </>
+              )}
+            </button>
+          </div>
+          <p className="text-[11px] text-[#94A3B8]">
+            Pushing any <code className="font-mono text-[#00E5FF]">v*.*.*</code> tag or running <code className="font-mono text-[#00E5FF]">./scripts/release.sh {releaseTag}</code> triggers GitHub Actions to build, sign, generate SHA-256 checksums, and publish a GitHub Release with Android 6.0+ Debug &amp; Release APKs.
+          </p>
         </div>
 
         {/* File Tree + Code Viewer */}
