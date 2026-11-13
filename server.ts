@@ -45,9 +45,9 @@ async function fetchNordServers(): Promise<{ servers: VpnServer[]; source: 'live
 
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4500);
+    const timer = setTimeout(() => controller.abort(), 12000);
     const res = await fetch(
-      'https://api.nordvpn.com/v1/servers?limit=80&filters[servers_technologies][identifier]=ikev2',
+      'https://api.nordvpn.com/v1/servers?limit=0&filters[servers_technologies][identifier]=ikev2',
       {
         signal: controller.signal,
         headers: { 'User-Agent': 'NordVPN-IKEv2-Explorer/1.0' },
@@ -357,7 +357,7 @@ async function runWorkerPool<T, R>(items: T[], concurrency: number, workerFn: (i
 
 async function startServer() {
   const app = express();
-  app.use(express.json({ limit: '2mb' }));
+  app.use(express.json({ limit: '15mb' }));
 
   app.get('/api/health', (_req, res) => {
     res.json({ status: 'ok', service: 'NordVPN IKEv2 Explorer' });
@@ -367,7 +367,7 @@ async function startServer() {
     const data = await fetchNordServers();
     res.json({
       source: data.source,
-      totalDiscovered: data.source === 'live-nord-api' ? 3640 : 3580,
+      totalDiscovered: data.source === 'live-nord-api' ? data.servers.length : 3580,
       servers: data.servers,
     });
   });
@@ -387,7 +387,7 @@ async function startServer() {
       useWrongCredentialCheck?: boolean;
     };
 
-    const targets = servers.length > 0 ? servers.slice(0, 60) : FALLBACK_NORD_SERVERS;
+    const targets = servers.length > 0 ? servers : FALLBACK_NORD_SERVERS;
     const startTime = performance.now();
     const probed = await runWorkerPool(targets, Math.min(64, Math.max(8, workers)), (srv) =>
       probeServerNode(srv, probePort === 4500 ? 4500 : 500, timeoutMs, useWrongCredentialCheck)

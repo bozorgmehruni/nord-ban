@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   XCircle,
   ShieldCheck,
+  Square,
 } from 'lucide-react';
 import type { VpnServer, ScanConfig } from '../types/vpn';
 
@@ -17,10 +18,12 @@ interface ScannerViewProps {
   dataSource: 'live-nord-api' | 'curated-snapshot';
   scanConfig: ScanConfig;
   isScanning: boolean;
+  scanProgress: { completed: number; total: number } | null;
   lastScanDurationMs: number | null;
   selectedServerId: number;
   onUpdateConfig: (patch: Partial<ScanConfig>) => void;
   onRunScan: () => void;
+  onStopScan: () => void;
   onSelectAndConnect: (server: VpnServer) => void;
   onTraceServer: (server: VpnServer) => void;
 }
@@ -31,10 +34,12 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
   dataSource,
   scanConfig,
   isScanning,
+  scanProgress,
   lastScanDurationMs,
   selectedServerId,
   onUpdateConfig,
   onRunScan,
+  onStopScan,
   onSelectAndConnect,
   onTraceServer,
 }) => {
@@ -43,6 +48,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
   const [cleanOnly, setCleanOnly] = useState(false);
   const [techFilter, setTechFilter] = useState<'all' | 'ikev2' | 'wireguard_udp' | 'openvpn_udp'>('all');
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [visibleCount, setVisibleCount] = useState(100);
 
   const regions = ['All', 'Europe', 'North America', 'Asia-Pacific', 'Middle East & Africa', 'South America'];
 
@@ -71,13 +77,29 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
       });
   }, [servers, scanConfig.regionFilter, cleanOnly, techFilter, searchQuery, sortBy]);
 
-  const cleanCount = servers.filter((s) => s.banStatus === 'clean').length;
-  const cleanRate = servers.length ? ((cleanCount / servers.length) * 100).toFixed(1) : '0.0';
+  const displayedServers = useMemo(
+    () => filteredServers.slice(0, visibleCount),
+    [filteredServers, visibleCount]
+  );
+
+  const probedCount = useMemo(
+    () => servers.filter((s) => s.banStatus !== 'untested').length,
+    [servers]
+  );
+  const cleanCount = useMemo(
+    () => servers.filter((s) => s.banStatus === 'clean').length,
+    [servers]
+  );
+  const cleanRate = probedCount > 0 ? ((cleanCount / probedCount) * 100).toFixed(1) : '0.0';
   const avgLatency = useMemo(() => {
     const valid = servers.filter((s) => s.latencyMs !== null);
     if (!valid.length) return 0;
     return Math.round(valid.reduce((acc, s) => acc + (s.latencyMs ?? 0), 0) / valid.length);
   }, [servers]);
+
+  const progressPct = scanProgress && scanProgress.total > 0
+    ? Math.round((scanProgress.completed / scanProgress.total) * 100)
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -91,19 +113,19 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
             {totalDiscovered.toLocaleString()}
           </div>
           <div className="mt-1 text-xs text-[#8c90a0]">
-            {dataSource === 'live-nord-api' ? 'Live NordVPN API' : 'Curated Relay Snapshot'}
+            {dataSource === 'live-nord-api' ? 'Live NordVPN Full API' : 'Curated Relay Snapshot'}
           </div>
         </div>
 
         <div className="rounded-xl obsidian-card p-4">
           <div className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0]">
-            Active Probed Relays
+            Probed / Loaded List
           </div>
           <div className="mt-1.5 font-mono text-2xl font-bold text-[#00E5FF] tabular-nums">
-            {servers.length}
+            {probedCount.toLocaleString()} / {servers.length.toLocaleString()}
           </div>
           <div className="mt-1 text-xs text-[#8c90a0] tabular-nums">
-            {lastScanDurationMs ? `Last sweep ${lastScanDurationMs}ms` : 'Ready to probe'}
+            {lastScanDurationMs ? `Last sweep ${(lastScanDurationMs / 1000).toFixed(1)}s` : 'Ready to scan all nodes'}
           </div>
         </div>
 
@@ -115,7 +137,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
             {cleanRate}%
           </div>
           <div className="mt-1 text-xs text-[#8c90a0] tabular-nums">
-            {cleanCount} low-ban relays verified
+            {cleanCount.toLocaleString()} low-ban relays verified
           </div>
         </div>
 
@@ -140,19 +162,55 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
               vpnban IKEv2 Async Probe Engine
             </h1>
             <p className="text-xs sm:text-sm text-[#c2c6d7] mt-1">
-              Every scan generates random fake usernames and passwords per relay to detect clean gateways safely — your real NordService password is only requested when you connect.
+              Scans ALL {servers.length.toLocaleString()} servers in the loaded list using auto-generated random fake usernames and passwords — your real NordService password is requested only when connecting.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onRunScan}
-            disabled={isScanning}
-            className="min-h-[48px] px-5 py-2.5 rounded-lg bg-[#2979FF] hover:bg-[#1E66E5] text-sm font-semibold text-[#F8FAFC] inline-flex items-center gap-2 transition-all obsidian-halo-blue whitespace-nowrap disabled:opacity-60"
-          >
-            <Radar className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
-            <span>{isScanning ? `Probing (${scanConfig.workers} Workers)...` : 'Scan w/ Random Fake Creds'}</span>
-          </button>
+          <div className="flex items-center gap-2.5">
+            {isScanning && (
+              <button
+                type="button"
+                onClick={onStopScan}
+                className="min-h-[48px] px-4 py-2.5 rounded-lg bg-[#262a33] border border-[#FF1744]/50 text-sm font-semibold text-[#FF1744] hover:bg-[#FF1744]/10 inline-flex items-center gap-2 whitespace-nowrap"
+              >
+                <Square className="w-3.5 h-3.5 fill-current" />
+                <span>Stop</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onRunScan}
+              disabled={isScanning}
+              className="min-h-[48px] px-5 py-2.5 rounded-lg bg-[#2979FF] hover:bg-[#1E66E5] text-sm font-semibold text-[#F8FAFC] inline-flex items-center gap-2 transition-all obsidian-halo-blue whitespace-nowrap disabled:opacity-60"
+            >
+              <Radar className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
+              <span>
+                {isScanning && scanProgress
+                  ? `Probing ${scanProgress.completed.toLocaleString()}/${scanProgress.total.toLocaleString()} (${progressPct}%)`
+                  : `Scan All ${servers.length.toLocaleString()} Servers (Fake Creds)`}
+              </span>
+            </button>
+          </div>
         </div>
+
+        {/* Live Full-List Progress Bar */}
+        {scanProgress && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-xs font-mono text-[#c2c6d7] tabular-nums">
+              <span>
+                {isScanning ? 'Batch probing all loaded relays...' : 'Full list probe complete'}
+              </span>
+              <span className="text-[#00E5FF]">
+                {scanProgress.completed.toLocaleString()} / {scanProgress.total.toLocaleString()} ({progressPct}%)
+              </span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-[#0a0e16] overflow-hidden border border-white/5">
+              <div
+                className="h-full bg-gradient-to-r from-[#2979FF] to-[#00E5FF] transition-all duration-300"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Scanner Parameters Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-3 border-t border-white/10">
@@ -255,8 +313,11 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Filter by hostname, city, country, or IPv4..."
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setVisibleCount(100);
+                }}
+                placeholder={`Search all ${servers.length.toLocaleString()} gateways by hostname, city, country, or IPv4...`}
                 className="w-full h-12 pl-10 pr-4 rounded-lg bg-[#0a0e16] border border-[#424655] text-sm text-[#dfe2ee] placeholder-[#8c90a0] focus:outline-none focus:border-[#00E5FF] focus:ring-1 focus:ring-[#00E5FF]"
               />
             </div>
@@ -264,7 +325,10 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <select
                 value={techFilter}
-                onChange={(e) => setTechFilter(e.target.value as typeof techFilter)}
+                onChange={(e) => {
+                  setTechFilter(e.target.value as typeof techFilter);
+                  setVisibleCount(100);
+                }}
                 aria-label="Filter by protocol"
                 className="h-12 px-3 rounded-lg bg-[#0a0e16] border border-[#424655] text-xs text-[#dfe2ee] focus:outline-none focus:border-[#00E5FF]"
               >
@@ -287,7 +351,10 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
 
               <button
                 type="button"
-                onClick={() => setCleanOnly((v) => !v)}
+                onClick={() => {
+                  setCleanOnly((v) => !v);
+                  setVisibleCount(100);
+                }}
                 className={`h-12 px-4 rounded-lg border text-xs font-medium transition-colors whitespace-nowrap ${
                   cleanOnly
                     ? 'border-[#2979FF] bg-[#2979FF]/15 text-[#dfe2ee]'
@@ -299,33 +366,41 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
             </div>
           </div>
 
-          {/* State Filter Chips (32dp height, Stitch Obsidian style) */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-1">
-            {regions.map((region) => (
-              <button
-                key={region}
-                type="button"
-                onClick={() => onUpdateConfig({ regionFilter: region })}
-                className={`h-8 px-3 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap shrink-0 ${
-                  scanConfig.regionFilter === region
-                    ? 'border-[#2979FF] bg-[#2979FF]/15 text-[#dfe2ee]'
-                    : 'border-white/10 bg-[#181c24] text-[#c2c6d7] hover:text-[#dfe2ee]'
-                }`}
-              >
-                {region}
-              </button>
-            ))}
+          {/* State Filter Chips */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              {regions.map((region) => (
+                <button
+                  key={region}
+                  type="button"
+                  onClick={() => {
+                    onUpdateConfig({ regionFilter: region });
+                    setVisibleCount(100);
+                  }}
+                  className={`h-8 px-3 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap shrink-0 ${
+                    scanConfig.regionFilter === region
+                      ? 'border-[#2979FF] bg-[#2979FF]/15 text-[#dfe2ee]'
+                      : 'border-white/10 bg-[#181c24] text-[#c2c6d7] hover:text-[#dfe2ee]'
+                  }`}
+                >
+                  {region}
+                </button>
+              ))}
+            </div>
+            <span className="font-mono text-xs text-[#8c90a0] tabular-nums">
+              Showing {displayedServers.length.toLocaleString()} of {filteredServers.length.toLocaleString()} matching
+            </span>
           </div>
         </div>
 
         {/* Data Grid */}
         <div className="divide-y divide-white/5">
-          {filteredServers.length === 0 ? (
+          {displayedServers.length === 0 ? (
             <div className="p-10 text-center text-sm text-[#8c90a0]">
               No gateways match the active filter criteria. Reset filters or run a fresh fleet scan.
             </div>
           ) : (
-            filteredServers.map((srv) => {
+            displayedServers.map((srv) => {
               const expanded = expandedId === srv.id;
               const isSelected = srv.id === selectedServerId;
 
@@ -420,7 +495,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                         <button
                           type="button"
                           onClick={() => setExpandedId(expanded ? null : srv.id)}
-                          aria-label="Toggle raw canary diagnostics"
+                          aria-label="Toggle raw fake-probe diagnostics"
                           className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg border border-white/10 bg-[#0a0e16] text-[#c2c6d7] hover:text-[#dfe2ee]"
                         >
                           {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -438,7 +513,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                             <div className="font-mono text-[#00E5FF] mt-0.5">{srv.wrongCredResponse}</div>
                           </div>
                           <div>
-                            <span className="text-[#8c90a0]">Jitter & Packet Loss:</span>
+                            <span className="text-[#8c90a0]">Jitter &amp; Packet Loss:</span>
                             <div className="font-mono text-[#dfe2ee] mt-0.5 tabular-nums">
                               ±{srv.jitterMs ?? 2.0} ms · {srv.packetLossPct}% loss
                             </div>
@@ -467,6 +542,18 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
             })
           )}
         </div>
+
+        {filteredServers.length > displayedServers.length && (
+          <div className="p-4 border-t border-white/10 bg-[#0a0e16]/50 flex items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => setVisibleCount((c) => c + 150)}
+              className="min-h-[40px] px-4 py-2 rounded-lg bg-[#262a33] border border-white/10 hover:border-[#00E5FF]/50 text-xs font-semibold text-[#dfe2ee]"
+            >
+              Show +150 More ({(filteredServers.length - displayedServers.length).toLocaleString()} remaining)
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );

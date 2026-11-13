@@ -57,9 +57,17 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
   const selectedPoint = projectCoords(selectedServer.lat, selectedServer.lon);
 
   const visibleServers = useMemo(() => {
-    if (activeRegion === 'All') return servers;
-    return servers.filter((s) => s.region === activeRegion);
-  }, [servers, activeRegion]);
+    const filtered = activeRegion === 'All' ? servers : servers.filter((s) => s.region === activeRegion);
+    const byGrid = new Map<string, VpnServer>();
+    for (const s of filtered) {
+      const key = `${Math.round(s.lat * 2)}_${Math.round(s.lon * 2)}`;
+      const existing = byGrid.get(key);
+      if (!existing || s.id === selectedServer.id || (existing.id !== selectedServer.id && s.score > existing.score)) {
+        byGrid.set(key, s);
+      }
+    }
+    return Array.from(byGrid.values()).slice(0, 220);
+  }, [servers, activeRegion, selectedServer.id]);
 
   const regionalClusters = useMemo(() => {
     const groups: Record<string, { count: number; avgPing: number; clean: number }> = {};

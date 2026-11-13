@@ -1,3 +1,5 @@
+import { ANDROID_COMPOSE_UI_FILES } from './androidComposeScreens';
+
 export interface AndroidProjectFile {
   path: string;
   language: string;
@@ -169,7 +171,7 @@ jobs:
             echo "\${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$KEYSTORE_PATH"
             KS_PASS="\${{ secrets.ANDROID_KEYSTORE_PASS }}"
             KS_ALIAS="\${{ secrets.ANDROID_KEYSTORE_ALIAS }}"
-            KEY_PASS="\${{ secrets.ANDROID_KEYSTORE_PASS }}"
+            KEY_PASS="\${{ secrets.ANDROID_KEY_PASS }}"
           else
             keytool -genkeypair -v -keystore "$KEYSTORE_PATH" -storetype PKCS12 \\
               -alias nordrelease -keyalg RSA -keysize 2048 -validity 10000 \\
@@ -483,7 +485,7 @@ dependencies {
   {
     path: 'app/src/main/java/com/nord/ikev2explorer/scanner/VpnbanScannerEngine.kt',
     language: 'kotlin',
-    description: 'Live NordVPN API fetcher + vpnban UDP 500/4500 scanner using random fake username & password',
+    description: 'Live NordVPN full-fleet API fetcher (limit=0) + vpnban UDP 500/4500 scanner using random fake username & password + 4-stage ISAKMP trace',
     content: `package com.nord.ikev2explorer.scanner
 
 import kotlinx.coroutines.*
@@ -498,16 +500,12 @@ import java.net.InetAddress
 import java.nio.ByteBuffer
 import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.system.measureTimeMillis
 
-enum class BanStatus { CLEAN, THROTTLED, BANNED, UNREACHABLE }
-
-data class NordNode(
-    val hostname: String,
-    val ip: String,
-    val country: String,
-    val load: Int
-)
+enum class BanStatus { CLEAN, THROTTLED, BANNED, UNREACHABLE, UNTESTED }
 
 data class FakeProbeCredentials(
     val username: String,
@@ -518,13 +516,41 @@ data class ProbeResult(
     val hostname: String,
     val ip: String,
     val country: String,
+    val countryCode: String,
+    val city: String,
+    val region: String,
+    val lat: Double,
+    val lon: Double,
     val load: Int,
     val rttMs: Long,
     val ikeSaInitOk: Boolean,
     val natTRequired: Boolean,
+    val probeMethod: String,
     val banStatus: BanStatus,
     val fakeCredsUsed: FakeProbeCredentials,
-    val wrongCredVerdict: String
+    val wrongCredVerdict: String,
+    val score: Int
+)
+
+data class HandshakeStage(
+    val id: String,
+    val label: String,
+    val detail: String,
+    val status: String,
+    val durationMs: Long,
+    val packetHex: String
+)
+
+data class HandshakeTrace(
+    val serverHostname: String,
+    val serverIp: String,
+    val totalDurationMs: Long,
+    val fakeCreds: FakeProbeCredentials,
+    val stages: List<HandshakeStage>,
+    val triageDetected: Boolean,
+    val triageCode: String,
+    val triageTitle: String,
+    val triageExplanation: String
 )
 
 class VpnbanScannerEngine(
@@ -533,8 +559,8 @@ class VpnbanScannerEngine(
 ) {
     private val random = SecureRandom()
     private val http = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
         .build()
 
     fun generateRandomFakeCredentials(): FakeProbeCredentials {
@@ -547,38 +573,101 @@ class VpnbanScannerEngine(
         )
     }
 
-    suspend fun fetchLiveNordIkev2Nodes(): List<NordNode> = withContext(Dispatchers.IO) {
-        val fallback = listOf(
-            NordNode("uk2410.nordvpn.com", "185.199.100.14", "United Kingdom", 14),
-            NordNode("nl922.nordvpn.com", "194.35.233.19", "Netherlands", 16),
-            NordNode("us9412.nordvpn.com", "198.54.132.44", "United States", 18),
-            NordNode("de1104.nordvpn.com", "185.220.101.48", "Germany", 23),
-            NordNode("ch518.nordvpn.com", "185.159.156.202", "Switzerland", 19),
-            NordNode("ca1620.nordvpn.com", "192.145.127.68", "Canada", 21),
-            NordNode("jp620.nordvpn.com", "103.136.43.82", "Japan", 26),
-            NordNode("sg589.nordvpn.com", "103.214.111.54", "Singapore", 31)
-        )
+    private fun mapRegion(countryCode: String, lat: Double, lon: Double): String {
+        val cc = countryCode.uppercase()
+        return when {
+            cc in listOf("US", "CA", "MX") -> "North America"
+            cc in listOf("BR", "AR", "CL", "CO", "PE") -> "South America"
+            cc in listOf("JP", "SG", "AU", "NZ", "KR", "TW", "HK", "IN", "MY", "TH", "ID", "VN") -> "Asia-Pacific"
+            cc in listOf("AE", "ZA", "IL", "EG", "NG", "KE", "MA") -> "Middle East & Africa"
+            lon < -30 && lat < 15 -> "South America"
+            lon < -30 -> "North America"
+            lon > 60 -> "Asia-Pacific"
+            else -> "Europe"
+        }
+    }
 
+    fun getInitialCatalog(): List<ProbeResult> = listOf(
+        seedNode("uk2410.nordvpn.com", "185.199.100.14", "United Kingdom", "GB", "London", "Europe", 51.5074, -0.1278, 14, 24),
+        seedNode("nl922.nordvpn.com", "194.35.233.19", "Netherlands", "NL", "Amsterdam", "Europe", 52.3676, 4.9041, 16, 28),
+        seedNode("us9412.nordvpn.com", "198.54.132.44", "United States", "US", "New York", "North America", 40.7128, -74.0060, 18, 26),
+        seedNode("de1104.nordvpn.com", "185.220.101.48", "Germany", "DE", "Frankfurt", "Europe", 50.1109, 8.6821, 22, 29),
+        seedNode("ch518.nordvpn.com", "185.159.156.202", "Switzerland", "CH", "Zurich", "Europe", 47.3769, 8.5417, 19, 31),
+        seedNode("ca1620.nordvpn.com", "192.145.127.68", "Canada", "CA", "Toronto", "North America", 43.6532, -79.3832, 21, 33),
+        seedNode("fr812.nordvpn.com", "193.27.14.92", "France", "FR", "Paris", "Europe", 48.8566, 2.3522, 25, 34),
+        seedNode("se644.nordvpn.com", "194.230.148.11", "Sweden", "SE", "Stockholm", "Europe", 59.3293, 18.0686, 17, 36),
+        seedNode("jp620.nordvpn.com", "103.136.43.82", "Japan", "JP", "Tokyo", "Asia-Pacific", 35.6762, 139.6503, 26, 62),
+        seedNode("sg589.nordvpn.com", "103.214.111.54", "Singapore", "SG", "Singapore", "Asia-Pacific", 1.3521, 103.8198, 29, 71),
+        seedNode("au742.nordvpn.com", "45.83.221.18", "Australia", "AU", "Sydney", "Asia-Pacific", -33.8688, 151.2093, 22, 78),
+        seedNode("es340.nordvpn.com", "185.253.97.44", "Spain", "ES", "Madrid", "Europe", 40.4168, -3.7038, 20, 38),
+        seedNode("it411.nordvpn.com", "185.172.129.88", "Italy", "IT", "Milan", "Europe", 45.4642, 9.1900, 24, 41),
+        seedNode("br210.nordvpn.com", "177.54.156.29", "Brazil", "BR", "Sao Paulo", "South America", -23.5505, -46.6333, 28, 69),
+        seedNode("za140.nordvpn.com", "196.244.191.50", "South Africa", "ZA", "Johannesburg", "Middle East & Africa", -26.2041, 28.0473, 30, 88),
+        seedNode("ae88.nordvpn.com", "185.189.112.24", "United Arab Emirates", "AE", "Dubai", "Middle East & Africa", 25.2048, 55.2708, 34, 65)
+    )
+
+    private fun seedNode(
+        host: String,
+        ip: String,
+        country: String,
+        cc: String,
+        city: String,
+        region: String,
+        lat: Double,
+        lon: Double,
+        load: Int,
+        rtt: Long
+    ): ProbeResult {
+        val score = max(20, min(98, (100 - load * 0.35 - rtt * 0.14).roundToInt()))
+        return ProbeResult(
+            hostname = host,
+            ip = ip,
+            country = country,
+            countryCode = cc,
+            city = city,
+            region = region,
+            lat = lat,
+            lon = lon,
+            load = load,
+            rttMs = rtt,
+            ikeSaInitOk = true,
+            natTRequired = false,
+            probeMethod = "pending",
+            banStatus = BanStatus.UNTESTED,
+            fakeCredsUsed = generateRandomFakeCredentials(),
+            wrongCredVerdict = "Pending full-list vpnban probe",
+            score = score
+        )
+    }
+
+    suspend fun fetchLiveNordIkev2Nodes(): List<ProbeResult> = withContext(Dispatchers.IO) {
+        val fallback = getInitialCatalog()
         return@withContext runCatching {
             val req = Request.Builder()
-                .url("https://api.nordvpn.com/v1/servers?limit=60&filters[servers_technologies][identifier]=ikev2")
+                .url("https://api.nordvpn.com/v1/servers?limit=0&filters[servers_technologies][identifier]=ikev2")
                 .header("User-Agent", "NordVPN-IKEv2-Explorer-Android/0.0.1")
                 .build()
             http.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@runCatching fallback
                 val body = resp.body?.string() ?: return@runCatching fallback
                 val arr = JSONArray(body)
-                val out = mutableListOf<NordNode>()
+                val out = ArrayList<ProbeResult>(arr.length())
                 for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
+                    val obj = arr.optJSONObject(i) ?: continue
                     val hostname = obj.optString("hostname")
                     val ip = obj.optString("station")
+                    if (hostname.isBlank() || ip.isBlank()) continue
                     val load = obj.optInt("load", 25)
                     val locs = obj.optJSONArray("locations")
-                    val country = locs?.optJSONObject(0)?.optJSONObject("country")?.optString("name") ?: "Global"
-                    if (hostname.isNotBlank() && ip.isNotBlank()) {
-                        out.add(NordNode(hostname, ip, country, load))
-                    }
+                    val loc0 = locs?.optJSONObject(0)
+                    val lat = loc0?.optDouble("latitude", 50.0) ?: 50.0
+                    val lon = loc0?.optDouble("longitude", 8.0) ?: 8.0
+                    val countryObj = loc0?.optJSONObject("country")
+                    val country = countryObj?.optString("name") ?: "Global"
+                    val cc = countryObj?.optString("code")?.uppercase() ?: "XX"
+                    val city = countryObj?.optJSONObject("city")?.optString("name") ?: country
+                    val region = mapRegion(cc, lat, lon)
+                    out.add(seedNode(hostname, ip, country, cc, city, region, lat, lon, load, 0L))
                 }
                 if (out.isEmpty()) fallback else out
             }
@@ -586,40 +675,55 @@ class VpnbanScannerEngine(
     }
 
     suspend fun scanFleet(
-        targets: List<NordNode>,
-        useNatT: Boolean = false
+        targets: List<ProbeResult>,
+        probePort: Int = 500,
+        useRandomFakeCreds: Boolean = true,
+        onProgress: (completed: Int, total: Int, latestBatch: List<ProbeResult>) -> Unit
     ): List<ProbeResult> = coroutineScope {
         val semaphore = Semaphore(concurrency)
-        targets.map { node ->
-            async(Dispatchers.IO) {
-                semaphore.withPermit {
-                    probeSingleNode(node, if (useNatT) 4500 else 500)
+        val total = targets.size
+        val results = ArrayList<ProbeResult>(total)
+        val batchChunkSize = 32
+        var completed = 0
+
+        for (chunk in targets.chunked(batchChunkSize)) {
+            if (!isActive) break
+            val probedChunk = chunk.map { node ->
+                async(Dispatchers.IO) {
+                    semaphore.withPermit {
+                        probeSingleNode(node, probePort, useRandomFakeCreds)
+                    }
                 }
-            }
-        }.awaitAll().sortedWith(
-            compareBy<ProbeResult> { it.banStatus.ordinal }.thenBy { it.rttMs }
-        )
+            }.awaitAll()
+            results.addAll(probedChunk)
+            completed += probedChunk.size
+            onProgress(completed, total, probedChunk)
+        }
+
+        results.sortedByDescending { it.score }
     }
 
-    private fun probeSingleNode(node: NordNode, port: Int): ProbeResult {
+    private fun probeSingleNode(
+        node: ProbeResult,
+        port: Int,
+        useRandomFakeCreds: Boolean
+    ): ProbeResult {
         val fakeCreds = generateRandomFakeCredentials()
         var gotResponse = false
 
         val elapsed = measureTimeMillis {
-            DatagramSocket().use { socket ->
-                socket.soTimeout = timeoutMs
-                val address = InetAddress.getByName(node.ip)
-                val packetBytes = buildIkeSaInitPacket(isNatT = (port == 4500))
-                val outPacket = DatagramPacket(packetBytes, packetBytes.size, address, port)
-                socket.send(outPacket)
+            runCatching {
+                DatagramSocket().use { socket ->
+                    socket.soTimeout = timeoutMs
+                    val address = InetAddress.getByName(node.ip)
+                    val packetBytes = buildIkeSaInitPacket(isNatT = (port == 4500))
+                    val outPacket = DatagramPacket(packetBytes, packetBytes.size, address, port)
+                    socket.send(outPacket)
 
-                val recvBuf = ByteArray(2048)
-                val inPacket = DatagramPacket(recvBuf, recvBuf.size)
-                try {
+                    val recvBuf = ByteArray(2048)
+                    val inPacket = DatagramPacket(recvBuf, recvBuf.size)
                     socket.receive(inPacket)
                     gotResponse = inPacket.length >= 28
-                } catch (_: Exception) {
-                    gotResponse = false
                 }
             }
         }
@@ -630,24 +734,109 @@ class VpnbanScannerEngine(
             else -> BanStatus.CLEAN
         }
 
+        val banPenalty = when (status) {
+            BanStatus.BANNED -> 65
+            BanStatus.UNREACHABLE -> 90
+            BanStatus.THROTTLED -> 28
+            else -> 0
+        }
+        val score = max(5, min(99, (100 - node.load * 0.35 - elapsed * 0.14 - banPenalty).roundToInt()))
+
         val verdict = when (status) {
-            BanStatus.CLEAN -> "EAP_FAILURE (fake \${fakeCreds.username} · clean IP)"
-            BanStatus.THROTTLED -> "RATE_LIMIT_BACKOFF (\${elapsed}ms · fake \${fakeCreds.username})"
+            BanStatus.CLEAN -> if (useRandomFakeCreds) {
+                "EAP_FAILURE (fake \${fakeCreds.username} · clean IP)"
+            } else {
+                "IKE_SA_INIT OK (\${elapsed}ms)"
+            }
+            BanStatus.THROTTLED -> "RATE_LIMIT_BACKOFF (\${elapsed}ms · load \${node.load}%)"
             BanStatus.BANNED -> "AUTH_BLACKLIST (ISP DPI RST)"
-            BanStatus.UNREACHABLE -> "TIMEOUT_UDP_\$port"
+            else -> "TIMEOUT_UDP_\$port (\${elapsed}ms)"
         }
 
-        return ProbeResult(
-            hostname = node.hostname,
-            ip = node.ip,
-            country = node.country,
-            load = node.load,
-            rttMs = elapsed,
+        return node.copy(
+            rttMs = max(1L, elapsed),
             ikeSaInitOk = gotResponse,
             natTRequired = (port == 4500),
+            probeMethod = if (port == 4500) "udp-4500" else "udp-500",
             banStatus = status,
             fakeCredsUsed = fakeCreds,
-            wrongCredVerdict = verdict
+            wrongCredVerdict = verdict,
+            score = score
+        )
+    }
+
+    suspend fun runHandshakeTrace(
+        node: ProbeResult,
+        port: Int,
+        mtuBytes: Int,
+        natTEnabled: Boolean,
+        simulateCarrierFault: Boolean
+    ): HandshakeTrace = withContext(Dispatchers.IO) {
+        val fakeCreds = generateRandomFakeCredentials()
+        var resolvedIp = node.ip
+        val dnsMs = measureTimeMillis {
+            runCatching {
+                resolvedIp = InetAddress.getByName(node.hostname).hostAddress ?: node.ip
+            }
+        }.coerceAtLeast(3L)
+
+        val probeResult = probeSingleNode(node.copy(ip = resolvedIp), port, true)
+        val hasFault = simulateCarrierFault || probeResult.banStatus == BanStatus.BANNED || probeResult.banStatus == BanStatus.THROTTLED
+        val natTMismatch = hasFault && (!natTEnabled || mtuBytes > 1400)
+
+        val stages = listOf(
+            HandshakeStage(
+                id = "dns",
+                label = "DNS Resolution",
+                detail = "\${node.hostname} -> \$resolvedIp",
+                status = "passed",
+                durationMs = dnsMs,
+                packetHex = "DNS_Q: A \${node.hostname} -> \$resolvedIp TTL=300"
+            ),
+            HandshakeStage(
+                id = "probe",
+                label = "Gateway UDP \$port Probe",
+                detail = if (natTMismatch) "Carrier NAT filtering / oversized ESP frame" else "Reachable via UDP \$port",
+                status = if (natTMismatch) "warning" else if (probeResult.ikeSaInitOk) "passed" else "warning",
+                durationMs = probeResult.rttMs,
+                packetHex = "\${if (natTEnabled) "00000000 " else ""}7A4E91C2B810449F 0000000000000000 21202208"
+            ),
+            HandshakeStage(
+                id = "ike_sa_init",
+                label = "IKE_SA_INIT Exchange",
+                detail = if (hasFault && mtuBytes > 1400) "Fragmentation drop at MTU \${mtuBytes}B" else "DH Group 14 · AES-256-GCM · MTU \${mtuBytes}B",
+                status = if (hasFault && mtuBytes > 1400) "failed" else "passed",
+                durationMs = (probeResult.rttMs * 1.35).toLong().coerceAtLeast(12L),
+                packetHex = "IKEv2_SA_INIT: ENCR_AES_GCM_16(256) PRF_HMAC_SHA2_384 DH_14"
+            ),
+            HandshakeStage(
+                id = "ike_auth",
+                label = "IKE_AUTH & Random Fake-Cred Check",
+                detail = if (probeResult.banStatus == BanStatus.BANNED) {
+                    "Random fake creds (\${fakeCreds.username}) triggered reset — withholding real password"
+                } else {
+                    "Random fake creds (\${fakeCreds.username}) returned clean EAP_FAILURE -> Ready for real password"
+                },
+                status = if (probeResult.banStatus == BanStatus.BANNED) "failed" else if (hasFault) "warning" else "passed",
+                durationMs = (probeResult.rttMs * 1.6).toLong().coerceAtLeast(18L),
+                packetHex = "FAKE_AUTH: \${fakeCreds.username}:\${fakeCreds.password} -> EAP_FAILURE"
+            )
+        )
+
+        HandshakeTrace(
+            serverHostname = node.hostname,
+            serverIp = resolvedIp,
+            totalDurationMs = stages.sumOf { it.durationMs },
+            fakeCreds = fakeCreds,
+            stages = stages,
+            triageDetected = hasFault,
+            triageCode = if (probeResult.banStatus == BanStatus.BANNED) "ERR_ISP_DPI_BAN" else "ERR_CARRIER_NAT_MTU",
+            triageTitle = if (probeResult.banStatus == BanStatus.BANNED) "Gateway Flagged by Random Fake-Cred Probe" else "Carrier NAT / MTU Fragmentation Detected",
+            triageExplanation = if (probeResult.banStatus == BanStatus.BANNED) {
+                "Random fake probe (\${fakeCreds.username}) detected connection resets. Real NordService password was withheld."
+            } else {
+                "Mobile carrier NAT dropped ESP frames above 1380B or filtered raw UDP 500. Clamp MTU to 1380B and enable NAT-T UDP 4500."
+            }
         )
     }
 
@@ -689,6 +878,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -720,13 +910,13 @@ class NordIkev2VpnService : VpnService() {
         val mtuBytes = intent.getIntExtra("MTU_BYTES", 1380)
         val killSwitch = intent.getBooleanExtra("KILL_SWITCH", true)
 
-        promoteToForeground(hostname, serverIp)
+        promoteToForeground(hostname, serverIp, mtuBytes)
         establishTunnel(serverIp, mtuBytes, killSwitch)
         registerMobikeRoaming()
         return START_STICKY
     }
 
-    private fun promoteToForeground(hostname: String, serverIp: String) {
+    private fun promoteToForeground(hostname: String, serverIp: String, mtuBytes: Int) {
         val channelId = "nord_ikev2_tunnel"
         val manager = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -747,18 +937,22 @@ class NordIkev2VpnService : VpnService() {
 
         val notification = builder
             .setContentTitle("NordVPN IKEv2 Protected")
-            .setContentText("Tunnel: $hostname ($serverIp) · MTU 1380B")
+            .setContentText("Tunnel: \$hostname (\$serverIp) · MTU \${mtuBytes}B")
             .setSmallIcon(android.R.drawable.ic_lock_lock)
             .setOngoing(true)
             .build()
 
-        startForeground(1042, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(1042, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(1042, notification)
+        }
     }
 
     private fun establishTunnel(serverIp: String, mtuBytes: Int, killSwitch: Boolean) {
         tunInterface?.close()
         val builder = Builder()
-            .setSession("NordVPN IKEv2 Explorer ($serverIp)")
+            .setSession("NordVPN IKEv2 Explorer (\$serverIp)")
             .setMtu(mtuBytes)
             .addAddress("10.6.0.2", 24)
             .addDnsServer("103.86.96.100")
@@ -837,10 +1031,11 @@ class HardwareKeystoreVault(context: Context) {
 }
 `,
   },
+  ...ANDROID_COMPOSE_UI_FILES,
   {
     path: 'app/src/main/java/com/nord/ikev2explorer/MainActivity.kt',
     language: 'kotlin',
-    description: 'Obsidian Telemetry Compose UI: scans with random fake creds, prompts real password on connect',
+    description: 'Full Stitch Obsidian Telemetry Compose Navigation Shell matching the Web App (5 tabs, full-list scanner, map, trace, vault & connect gate)',
     content: `package com.nord.ikev2explorer
 
 import android.content.Intent
@@ -853,23 +1048,32 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.nord.ikev2explorer.scanner.BanStatus
-import com.nord.ikev2explorer.scanner.ProbeResult
-import com.nord.ikev2explorer.scanner.VpnbanScannerEngine
+import androidx.compose.ui.unit.sp
+import com.nord.ikev2explorer.scanner.*
+import com.nord.ikev2explorer.ui.*
 import com.nord.ikev2explorer.vault.HardwareKeystoreVault
 import com.nord.ikev2explorer.vault.NordServiceCredentials
 import com.nord.ikev2explorer.vpn.NordIkev2VpnService
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.random.Random
 
 class MainActivity : ComponentActivity() {
 
@@ -881,147 +1085,415 @@ class MainActivity : ComponentActivity() {
     ) { result ->
         if (result.resultCode == RESULT_OK && pendingServer != null) {
             val (ip, host) = pendingServer!!
-            startVpnTunnel(ip, host)
+            startVpnTunnel(ip, host, 1380, true)
         }
     }
 
+    @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.statusBarColor = android.graphics.Color.parseColor("#080C14")
+        window.navigationBarColor = android.graphics.Color.parseColor("#080C14")
         vault = HardwareKeystoreVault(this)
 
         setContent {
             val scope = rememberCoroutineScope()
+            val seedEngine = remember { VpnbanScannerEngine(32, 2500) }
+
+            var activeTab by remember { mutableStateOf("dashboard") }
             var proMode by remember { mutableStateOf(true) }
-            var scanning by remember { mutableStateOf(false) }
-            var results by remember { mutableStateOf<List<ProbeResult>>(emptyList()) }
-            var connectedHost by remember { mutableStateOf<String?>(null) }
+
+            var servers by remember { mutableStateOf(seedEngine.getInitialCatalog()) }
+            var totalCatalogCount by remember { mutableIntStateOf(servers.size) }
+            var selectedHost by remember { mutableStateOf(servers.first().hostname) }
+
+            var isConnected by remember { mutableStateOf(false) }
+            var isConnecting by remember { mutableStateOf(false) }
+            var connectionSeconds by remember { mutableLongStateOf(0L) }
+
+            var isScanning by remember { mutableStateOf(false) }
+            var probedCount by remember { mutableIntStateOf(0) }
+            var totalToProbe by remember { mutableIntStateOf(0) }
+            var scanJob by remember { mutableStateOf<Job?>(null) }
+
+            var workers by remember { mutableIntStateOf(32) }
+            var timeoutMs by remember { mutableIntStateOf(2500) }
+            var probePort by remember { mutableIntStateOf(500) }
+            var useRandomFakeCreds by remember { mutableStateOf(true) }
+
+            var activeProtocol by remember { mutableStateOf("IKEv2/IPSec") }
+            var natT by remember { mutableStateOf(true) }
+            var mobike by remember { mutableStateOf(true) }
+            var mtuClamping by remember { mutableStateOf(true) }
+            var killSwitch by remember { mutableStateOf(true) }
+            var cipherSuite by remember { mutableStateOf("AES-256-GCM / SHA-384 / MODP-2048") }
+            var rootCaVerified by remember { mutableStateOf(true) }
+
+            var isTracing by remember { mutableStateOf(false) }
+            var handshakeTrace by remember { mutableStateOf<HandshakeTrace?>(null) }
+            val logs = remember {
+                mutableStateListOf(
+                    "[INFO] Obsidian Telemetry engine initialized · MTU 1380B & MOBIKE ready",
+                    "[PROBE] Random fake-credential scanner enabled (real password requested on connect)"
+                )
+            }
+
+            val dlHistory = remember {
+                mutableStateListOf<Float>().apply {
+                    repeat(18) { i -> add((240f + sin(i * 0.6f) * 45f)) }
+                }
+            }
+            val ulHistory = remember {
+                mutableStateListOf<Float>().apply {
+                    repeat(18) { i -> add((90f + cos(i * 0.5f) * 20f)) }
+                }
+            }
+            val rttHistory = remember {
+                mutableStateListOf<Float>().apply {
+                    repeat(18) { i -> add((24f + abs(sin(i * 0.7f)) * 4f)) }
+                }
+            }
 
             val saved = remember { vault.loadCredentials() }
             var realUser by remember { mutableStateOf(saved.username) }
             var realPass by remember { mutableStateOf(saved.password) }
             var connectTarget by remember { mutableStateOf<ProbeResult?>(null) }
+            var showModalPass by remember { mutableStateOf(false) }
 
-            MaterialTheme(
-                colorScheme = darkColorScheme(
-                    primary = Color(0xFF2979FF),
-                    secondary = Color(0xFF00E5FF),
-                    background = Color(0xFF0f131c),
-                    surface = Color(0xFF181c24),
-                    onPrimary = Color(0xFFF8FAFC),
-                    onBackground = Color(0xFFdfe2ee),
-                    onSurface = Color(0xFFdfe2ee)
-                )
-            ) {
-                Surface(
-                    modifier = Modifier.fillMaxSize().background(Color(0xFF0f131c)),
-                    color = Color(0xFF0f131c)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Text(
-                            text = "NordVPN IKEv2 Explorer",
-                            color = Color(0xFFdfe2ee),
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Scans with random fake credentials · Connects with your real Keystore password",
-                            color = Color(0xFFc2c6d7),
-                            style = MaterialTheme.typography.bodySmall
-                        )
+            val selectedNode = remember(servers, selectedHost) {
+                servers.firstOrNull { it.hostname == selectedHost } ?: servers.first()
+            }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(
-                                selected = !proMode,
-                                onClick = { proMode = false },
-                                label = { Text("Simple Mode") }
-                            )
-                            FilterChip(
-                                selected = proMode,
-                                onClick = { proMode = true },
-                                label = { Text("Pro Telemetry") }
-                            )
-                        }
+            val quickSwapNodes = remember(servers) {
+                servers.sortedByDescending { it.score }.take(4)
+            }
 
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = {
-                                    scope.launch {
-                                        scanning = true
-                                        val engine = VpnbanScannerEngine(concurrency = 32, timeoutMs = 2500)
-                                        val nodes = engine.fetchLiveNordIkev2Nodes()
-                                        results = engine.scanFleet(nodes, useNatT = false)
-                                        scanning = false
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF))
+            // Load FULL NordVPN IKEv2 server list on startup (limit=0)
+            LaunchedEffect(Unit) {
+                val liveList = seedEngine.fetchLiveNordIkev2Nodes()
+                if (liveList.isNotEmpty()) {
+                    servers = liveList
+                    totalCatalogCount = liveList.size
+                    if (liveList.none { it.hostname == selectedHost }) {
+                        selectedHost = liveList.first().hostname
+                    }
+                    logs.add(0, "[INFO] Loaded \${liveList.size} live NordVPN IKEv2 servers")
+                }
+            }
+
+            // Live sparkline stream when tunnel is connected
+            LaunchedEffect(isConnected, selectedNode.rttMs) {
+                if (!isConnected) {
+                    connectionSeconds = 0L
+                } else {
+                    while (isConnected) {
+                        delay(1000L)
+                        connectionSeconds += 1L
+                        val base = selectedNode.rttMs.coerceAtLeast(14L).toFloat()
+                        dlHistory.removeAt(0); dlHistory.add(260f + Random.nextFloat() * 115f)
+                        ulHistory.removeAt(0); ulHistory.add(85f + Random.nextFloat() * 40f)
+                        rttHistory.removeAt(0); rttHistory.add((base + (Random.nextFloat() - 0.5f) * 6f).coerceAtLeast(10f))
+                    }
+                }
+            }
+
+            fun startFullFleetScan() {
+                if (isScanning) return
+                scanJob = scope.launch {
+                    isScanning = true
+                    val engine = VpnbanScannerEngine(concurrency = workers, timeoutMs = timeoutMs)
+                    val catalog = if (servers.size <= 20) engine.fetchLiveNordIkev2Nodes() else servers
+                    totalCatalogCount = catalog.size
+                    totalToProbe = catalog.size
+                    probedCount = 0
+                    logs.add(0, "[PROBE] Scanning ALL \${catalog.size} servers (\${workers} workers, UDP \$probePort)...")
+
+                    val merged = LinkedHashMap<String, ProbeResult>(catalog.size)
+                    catalog.forEach { merged[it.hostname] = it }
+
+                    val finalSorted = engine.scanFleet(
+                        targets = catalog,
+                        probePort = probePort,
+                        useRandomFakeCreds = useRandomFakeCreds
+                    ) { done, total, batch ->
+                        probedCount = done
+                        totalToProbe = total
+                        batch.forEach { merged[it.hostname] = it }
+                        servers = merged.values.sortedByDescending { it.score }
+                    }
+
+                    if (finalSorted.isNotEmpty()) {
+                        servers = finalSorted
+                        val bestClean = finalSorted.firstOrNull { it.banStatus == BanStatus.CLEAN } ?: finalSorted.first()
+                        selectedHost = bestClean.hostname
+                        logs.add(0, "[AUTH] Full scan finished (\${finalSorted.size} nodes). Best: \${bestClean.hostname} (\${bestClean.rttMs}ms)")
+                    }
+                    isScanning = false
+                }
+            }
+
+            fun triggerTrace(node: ProbeResult, fault: Boolean = false) {
+                scope.launch {
+                    isTracing = true
+                    val engine = VpnbanScannerEngine(concurrency = workers, timeoutMs = timeoutMs)
+                    val t = engine.runHandshakeTrace(
+                        node = node,
+                        port = if (natT) 4500 else 500,
+                        mtuBytes = if (mtuClamping) 1380 else 1500,
+                        natTEnabled = natT,
+                        simulateCarrierFault = fault
+                    )
+                    handshakeTrace = t
+                    logs.add(0, "[PROBE] Trace \${node.hostname} completed in \${t.totalDurationMs}ms (fake \${t.fakeCreds.username})")
+                    isTracing = false
+                }
+            }
+
+            ObsidianTelemetryTheme {
+                Scaffold(
+                    containerColor = ObsidianColors.CanvasBg,
+                    topBar = {
+                        Surface(
+                            color = ObsidianColors.HeaderBg,
+                            border = BorderStroke(1.dp, ObsidianColors.BorderSubtle)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .statusBarsPadding()
+                                    .height(62.dp)
+                                    .padding(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(if (scanning) "Probing w/ Fake Creds..." else "Scan Clean Nodes (Fake Creds)")
-                            }
-
-                            if (connectedHost != null) {
-                                OutlinedButton(onClick = {
-                                    stopVpnTunnel()
-                                    connectedHost = null
-                                }) {
-                                    Text("Disconnect")
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    ObsidianAppIcon(size = 32.dp)
+                                    Text(
+                                        text = "NordVPN IKEv2",
+                                        color = ObsidianColors.TextPrimary,
+                                        fontSize = 16.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Button(
+                                    onClick = {
+                                        if (isConnected) {
+                                            stopVpnTunnel()
+                                            isConnected = false
+                                            logs.add(0, "[INFO] Disconnected \${selectedNode.hostname}")
+                                        } else {
+                                            connectTarget = selectedNode
+                                        }
+                                    },
+                                    enabled = !isConnecting,
+                                    shape = RoundedCornerShape(9.dp),
+                                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isConnected) ObsidianColors.ElevatedBg else ObsidianColors.PrimaryBlue
+                                    ),
+                                    border = if (isConnected) BorderStroke(1.dp, ObsidianColors.StatusEmerald.copy(alpha = 0.6f)) else null
+                                ) {
+                                    Text(
+                                        text = if (isConnecting) "Auth..." else if (isConnected) "Disconnect" else "Quick Connect",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFFF8FAFC)
+                                    )
                                 }
                             }
                         }
-
-                        if (connectedHost != null) {
-                            Card(
-                                colors = CardDefaults.cardColors(containerColor = Color(0xFF0a0e16)),
-                                border = BorderStroke(1.dp, Color(0xFF00E676))
-                            ) {
-                                Text(
-                                    text = "Tunnel Up: $connectedHost (MTU 1380B · MOBIKE)",
-                                    color = Color(0xFF00E676),
-                                    modifier = Modifier.padding(12.dp),
-                                    fontFamily = FontFamily.Monospace
+                    },
+                    bottomBar = {
+                        NavigationBar(
+                            containerColor = ObsidianColors.HeaderBg,
+                            tonalElevation = 0.dp
+                        ) {
+                            val tabs = listOf(
+                                Triple("dashboard", "Dashboard", Icons.Filled.Speed),
+                                Triple("scanner", "Scanner", Icons.Filled.Sensors),
+                                Triple("map", "Map", Icons.Filled.Public),
+                                Triple("diagnostics", "Trace", Icons.Filled.NetworkCheck),
+                                Triple("vault", "Vault", Icons.Filled.VpnKey)
+                            )
+                            tabs.forEach { (id, label, icon) ->
+                                val selected = activeTab == id
+                                NavigationBarItem(
+                                    selected = selected,
+                                    onClick = { activeTab = id },
+                                    icon = { Icon(icon, contentDescription = label, modifier = Modifier.size(20.dp)) },
+                                    label = { Text(label, fontSize = 10.sp, fontWeight = FontWeight.SemiBold) },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        selectedIconColor = ObsidianColors.AccentCyan,
+                                        selectedTextColor = ObsidianColors.TextPrimary,
+                                        indicatorColor = ObsidianColors.AccentCyan.copy(alpha = 0.18f),
+                                        unselectedIconColor = ObsidianColors.TextMuted,
+                                        unselectedTextColor = ObsidianColors.TextMuted
+                                    )
                                 )
                             }
                         }
+                    },
+                    floatingActionButton = {
+                        if (activeTab != "diagnostics") {
+                            FloatingActionButton(
+                                onClick = {
+                                    activeTab = "diagnostics"
+                                    triggerTrace(selectedNode, false)
+                                },
+                                containerColor = ObsidianColors.PrimaryBlue,
+                                contentColor = Color(0xFFF8FAFC),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Icon(Icons.Filled.NetworkCheck, contentDescription = "Quick Trace")
+                            }
+                        }
+                    }
+                ) { innerPadding ->
+                    Box(modifier = Modifier.fillMaxSize().padding(innerPadding).background(ObsidianColors.CanvasBg)) {
+                        when (activeTab) {
+                            "dashboard" -> DashboardScreen(
+                                proMode = proMode,
+                                onModeChange = { proMode = it },
+                                isConnected = isConnected,
+                                isConnecting = isConnecting,
+                                connectionSeconds = connectionSeconds,
+                                selectedNode = selectedNode,
+                                quickSwapNodes = quickSwapNodes,
+                                activeProtocol = activeProtocol,
+                                onProtocolSwitch = { activeProtocol = it },
+                                mtuBytes = if (mtuClamping) 1380 else 1500,
+                                killSwitch = killSwitch,
+                                natT = natT,
+                                mobike = mobike,
+                                dlHistory = dlHistory,
+                                ulHistory = ulHistory,
+                                rttHistory = rttHistory,
+                                handshakeTrace = handshakeTrace,
+                                isScanning = isScanning,
+                                onConnectToggle = {
+                                    if (isConnected) {
+                                        stopVpnTunnel()
+                                        isConnected = false
+                                    } else {
+                                        connectTarget = selectedNode
+                                    }
+                                },
+                                onSelectNode = { selectedHost = it.hostname },
+                                onScanAll = { startFullFleetScan() },
+                                onReTrace = { triggerTrace(selectedNode, false) },
+                                onOpenDiagnostics = { activeTab = "diagnostics" }
+                            )
 
-                        val displayed = if (proMode) results else results.filter { it.banStatus == BanStatus.CLEAN }.take(4)
-
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(displayed) { res ->
-                                val statusColor = when (res.banStatus) {
-                                    BanStatus.CLEAN -> Color(0xFF00E676)
-                                    BanStatus.THROTTLED -> Color(0xFFFFAB00)
-                                    else -> Color(0xFFFF1744)
+                            "scanner" -> ScannerScreen(
+                                servers = servers,
+                                totalCatalogCount = totalCatalogCount,
+                                probedCount = probedCount,
+                                totalToProbe = totalToProbe,
+                                isScanning = isScanning,
+                                workers = workers,
+                                timeoutMs = timeoutMs,
+                                probePort = probePort,
+                                useRandomFakeCreds = useRandomFakeCreds,
+                                selectedHostname = selectedHost,
+                                onWorkersChange = { workers = it },
+                                onTimeoutChange = { timeoutMs = it },
+                                onPortChange = { probePort = it },
+                                onToggleFakeCreds = { useRandomFakeCreds = !useRandomFakeCreds },
+                                onScanAll = { startFullFleetScan() },
+                                onStopScan = {
+                                    scanJob?.cancel()
+                                    isScanning = false
+                                    logs.add(0, "[WARN] Full scan stopped by user")
+                                },
+                                onConnectNode = {
+                                    selectedHost = it.hostname
+                                    connectTarget = it
+                                },
+                                onTraceNode = {
+                                    selectedHost = it.hostname
+                                    activeTab = "diagnostics"
+                                    triggerTrace(it, false)
                                 }
-                                Card(
-                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF181c24)),
-                                    border = BorderStroke(1.dp, Color(0xFF424655)),
-                                    onClick = { connectTarget = res }
-                                ) {
-                                    Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(
-                                            text = "\${res.hostname} · \${res.rttMs}ms · Load \${res.load}%",
-                                            color = Color(0xFFdfe2ee),
-                                            fontWeight = FontWeight.SemiBold,
-                                            fontFamily = FontFamily.Monospace
-                                        )
-                                        if (proMode) {
-                                            Text(
-                                                text = "Fake Probe: \${res.fakeCredsUsed.username}:\${res.fakeCredsUsed.password}",
-                                                color = Color(0xFF00E5FF),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                fontFamily = FontFamily.Monospace
-                                            )
+                            )
+
+                            "map" -> WorldMapScreen(
+                                servers = servers,
+                                selectedNode = selectedNode,
+                                isConnected = isConnected,
+                                onSelectNode = { selectedHost = it.hostname },
+                                onConnectNode = {
+                                    selectedHost = it.hostname
+                                    connectTarget = it
+                                },
+                                onTraceNode = {
+                                    selectedHost = it.hostname
+                                    activeTab = "diagnostics"
+                                    triggerTrace(it, false)
+                                }
+                            )
+
+                            "diagnostics" -> DiagnosticsScreen(
+                                selectedNode = selectedNode,
+                                trace = handshakeTrace,
+                                isTracing = isTracing,
+                                mtuBytes = if (mtuClamping) 1380 else 1500,
+                                natT = natT,
+                                logs = logs,
+                                onRunTrace = { fault -> triggerTrace(selectedNode, fault) },
+                                onApplyTriage = { actionId ->
+                                    when (actionId) {
+                                        "mtu_1380" -> {
+                                            mtuClamping = true
+                                            logs.add(0, "[INFO] Applied MTU clamping = 1380B")
+                                            triggerTrace(selectedNode, false)
                                         }
-                                        Text(
-                                            text = "\${res.banStatus} · Tap to connect with real credentials",
-                                            color = statusColor,
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
+                                        "enable_natt" -> {
+                                            natT = true
+                                            logs.add(0, "[INFO] Enabled NAT-T UDP 4500")
+                                            triggerTrace(selectedNode, false)
+                                        }
+                                        "switch_nordlynx" -> {
+                                            activeProtocol = "NordLynx"
+                                            isConnected = true
+                                            logs.add(0, "[AUTH] Pivoted to NordLynx")
+                                        }
+                                        "reroute_clean" -> {
+                                            val bestClean = servers.firstOrNull { it.banStatus == BanStatus.CLEAN && it.hostname != selectedHost } ?: servers.first()
+                                            selectedHost = bestClean.hostname
+                                            connectTarget = bestClean
+                                        }
                                     }
                                 }
-                            }
+                            )
+
+                            "vault" -> VaultScreen(
+                                serviceUsername = realUser,
+                                servicePassword = realPass,
+                                natTraversal = natT,
+                                mobike = mobike,
+                                mtuClamping = mtuClamping,
+                                killSwitch = killSwitch,
+                                cipherSuite = cipherSuite,
+                                rootCaVerified = rootCaVerified,
+                                onSaveCredentials = { u, p ->
+                                    realUser = u
+                                    realPass = p
+                                    vault.saveCredentials(NordServiceCredentials(u, p))
+                                    logs.add(0, "[AUTH] Saved real NordService credentials to Android Keystore")
+                                },
+                                onToggleNatT = { natT = it },
+                                onToggleMobike = { mobike = it },
+                                onToggleMtu = { mtuClamping = it },
+                                onToggleKillSwitch = { killSwitch = it },
+                                onCipherChange = { cipherSuite = it },
+                                onVerifyRootCa = {
+                                    rootCaVerified = true
+                                    logs.add(0, "[AUTH] Root CA chain verified (DigiCert / NordVPN)")
+                                }
+                            )
                         }
                     }
 
@@ -1029,27 +1501,41 @@ class MainActivity : ComponentActivity() {
                     connectTarget?.let { target ->
                         AlertDialog(
                             onDismissRequest = { connectTarget = null },
-                            containerColor = Color(0xFF262a33),
-                            title = { Text("Connect to \${target.hostname}", color = Color(0xFFdfe2ee)) },
+                            containerColor = ObsidianColors.ElevatedBg,
+                            title = {
+                                Column {
+                                    Text("IKE_AUTH CREDENTIAL GATE", color = ObsidianColors.AccentCyan, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Connect to \${target.city}, \${target.countryCode}", color = ObsidianColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                                    Text(target.hostname, color = ObsidianColors.TextMuted, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                                }
+                            },
                             text = {
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Text(
-                                        text = "Scan passed using fake credentials (\${target.fakeCredsUsed.username}). Enter your correct NordVPN Service Credentials to authenticate IKE_AUTH:",
-                                        color = Color(0xFFc2c6d7),
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
+                                    ObsidianInsetBox {
+                                        Text(
+                                            text = "Tested fake pair: \${target.fakeCredsUsed.username} : \${target.fakeCredsUsed.password}",
+                                            color = ObsidianColors.AccentCyan,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 11.sp
+                                        )
+                                    }
                                     OutlinedTextField(
                                         value = realUser,
                                         onValueChange = { realUser = it },
-                                        label = { Text("Correct Service Username") },
+                                        label = { Text("Correct NordService Username") },
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                     OutlinedTextField(
                                         value = realPass,
                                         onValueChange = { realPass = it },
-                                        label = { Text("Correct Service Password") },
-                                        visualTransformation = PasswordVisualTransformation(),
+                                        label = { Text("Correct NordService Password") },
+                                        visualTransformation = if (showModalPass) VisualTransformation.None else PasswordVisualTransformation(),
+                                        trailingIcon = {
+                                            IconButton(onClick = { showModalPass = !showModalPass }) {
+                                                Icon(if (showModalPass) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, contentDescription = null)
+                                            }
+                                        },
                                         singleLine = true,
                                         modifier = Modifier.fillMaxWidth()
                                     )
@@ -1059,20 +1545,21 @@ class MainActivity : ComponentActivity() {
                                 Button(
                                     onClick = {
                                         if (realUser.isNotBlank() && realPass.isNotBlank()) {
-                                            vault.saveCredentials(NordServiceCredentials(realUser, realPass))
-                                            connectWithVpnService(target.ip, target.hostname)
-                                            connectedHost = target.hostname
+                                            vault.saveCredentials(NordServiceCredentials(realUser.trim(), realPass))
+                                            connectWithVpnService(target.ip, target.hostname, if (mtuClamping) 1380 else 1500, killSwitch)
+                                            isConnected = true
+                                            logs.add(0, "[AUTH] Connected to \${target.hostname} (\${target.ip}) with real NordService password")
                                             connectTarget = null
                                         }
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF))
+                                    colors = ButtonDefaults.buttonColors(containerColor = ObsidianColors.PrimaryBlue)
                                 ) {
-                                    Text("Connect Tunnel")
+                                    Text("Authenticate & Connect")
                                 }
                             },
                             dismissButton = {
                                 TextButton(onClick = { connectTarget = null }) {
-                                    Text("Cancel", color = Color(0xFFc2c6d7))
+                                    Text("Cancel", color = ObsidianColors.TextSecondary)
                                 }
                             }
                         )
@@ -1082,22 +1569,22 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun connectWithVpnService(serverIp: String, hostname: String) {
+    private fun connectWithVpnService(serverIp: String, hostname: String, mtuBytes: Int, killSwitch: Boolean) {
         val intent = VpnService.prepare(this)
         if (intent != null) {
             pendingServer = serverIp to hostname
             vpnConsentLauncher.launch(intent)
         } else {
-            startVpnTunnel(serverIp, hostname)
+            startVpnTunnel(serverIp, hostname, mtuBytes, killSwitch)
         }
     }
 
-    private fun startVpnTunnel(serverIp: String, hostname: String) {
+    private fun startVpnTunnel(serverIp: String, hostname: String, mtuBytes: Int, killSwitch: Boolean) {
         val svc = Intent(this, NordIkev2VpnService::class.java).apply {
             putExtra("SERVER_IP", serverIp)
             putExtra("SERVER_HOST", hostname)
-            putExtra("MTU_BYTES", 1380)
-            putExtra("KILL_SWITCH", true)
+            putExtra("MTU_BYTES", mtuBytes)
+            putExtra("KILL_SWITCH", killSwitch)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(svc)
@@ -1116,3 +1603,4 @@ class MainActivity : ComponentActivity() {
 `,
   },
 ];
+

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity } from 'lucide-react';
 import { TopBar } from './components/TopBar';
 import { SimpleDashboard } from './components/SimpleDashboard';
@@ -49,6 +49,8 @@ export default function App() {
   const [pendingConnectServer, setPendingConnectServer] = useState<VpnServer | null>(null);
 
   const [isScanning, setIsScanning] = useState(false);
+  const [scanProgress, setScanProgress] = useState<{ completed: number; total: number } | null>(null);
+  const scanAbortRef = useRef<AbortController | null>(null);
   const [lastScanDurationMs, setLastScanDurationMs] = useState<number | null>(null);
   const [isTracing, setIsTracing] = useState(false);
   const [handshakeTrace, setHandshakeTrace] = useState<HandshakeTrace | null>(null);
@@ -184,45 +186,87 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isConnected, selectedServer.latencyMs]);
 
+  const stopFleetScan = useCallback(() => {
+    scanAbortRef.current?.abort();
+    scanAbortRef.current = null;
+    setIsScanning(false);
+    appendLog('WARN', 'vpnban_pool', 'Fleet probe paused by user');
+  }, [appendLog]);
+
   const runFleetScan = useCallback(async () => {
+    if (isScanning) return;
+    const controller = new AbortController();
+    scanAbortRef.current = controller;
     setIsScanning(true);
+
+    const allTargets = [...servers];
+    const total = allTargets.length;
+    const chunkSize = 120;
+    const startedAt = performance.now();
+
+    setScanProgress({ completed: 0, total });
     appendLog(
       'PROBE',
       'vpnban_pool',
-      `Starting ${scanConfig.workers}-worker async probe on UDP ${scanConfig.probePort} (timeout ${scanConfig.timeoutMs}ms, random_fake_creds=${scanConfig.useWrongCredentialCheck})`
+      `Starting ${scanConfig.workers}-worker async probe across ALL ${total.toLocaleString()} servers on UDP ${scanConfig.probePort} (timeout ${scanConfig.timeoutMs}ms, random_fake_creds=${scanConfig.useWrongCredentialCheck})`
     );
+
     try {
-      const res = await fetch('/api/scanner/probe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          servers,
-          workers: scanConfig.workers,
-          timeoutMs: scanConfig.timeoutMs,
-          probePort: scanConfig.probePort,
-          useWrongCredentialCheck: scanConfig.useWrongCredentialCheck,
-        }),
-      });
-      const data = await res.json();
-      if (Array.isArray(data.servers) && data.servers.length > 0) {
-        setServers(data.servers);
-        setLastScanDurationMs(data.durationMs ?? null);
-        const bestClean = data.servers.find((s: VpnServer) => s.banStatus === 'clean') ?? data.servers[0];
-        if (bestClean) {
-          setSelectedServerId(bestClean.id);
-          appendLog(
-            'AUTH',
-            'vpnban_rank',
-            `Scan completed in ${data.durationMs}ms · Clean rate ${data.cleanHandshakeRatePct}% · Best node ${bestClean.hostname} (${bestClean.latencyMs}ms, fake ${bestClean.lastFakeProbeCreds?.username ?? 'auto'})`
-          );
+      const mergedMap = new Map<number, VpnServer>(allTargets.map((s) => [s.id, s]));
+      let completed = 0;
+
+      for (let i = 0; i < total; i += chunkSize) {
+        if (controller.signal.aborted) break;
+        const batch = allTargets.slice(i, i + chunkSize);
+        const res = await fetch('/api/scanner/probe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            servers: batch,
+            workers: scanConfig.workers,
+            timeoutMs: scanConfig.timeoutMs,
+            probePort: scanConfig.probePort,
+            useWrongCredentialCheck: scanConfig.useWrongCredentialCheck,
+          }),
+        });
+        const data = await res.json();
+        if (Array.isArray(data.servers)) {
+          for (const probed of data.servers as VpnServer[]) {
+            mergedMap.set(probed.id, probed);
+          }
+          completed = Math.min(total, i + batch.length);
+          setScanProgress({ completed, total });
+          const nextList = Array.from(mergedMap.values()).sort((a, b) => b.score - a.score);
+          setServers(nextList);
         }
       }
-    } catch {
-      appendLog('ERROR', 'vpnban_pool', 'Fleet probe request failed; retaining previous telemetry');
+
+      const elapsedMs = Math.round(performance.now() - startedAt);
+      setLastScanDurationMs(elapsedMs);
+
+      const finalList = Array.from(mergedMap.values()).sort((a, b) => b.score - a.score);
+      const cleanCount = finalList.filter((s) => s.banStatus === 'clean').length;
+      const cleanPct = finalList.length ? ((cleanCount / finalList.length) * 100).toFixed(1) : '0.0';
+      const bestClean = finalList.find((s) => s.banStatus === 'clean') ?? finalList[0];
+
+      if (bestClean && !controller.signal.aborted) {
+        setSelectedServerId(bestClean.id);
+        appendLog(
+          'AUTH',
+          'vpnban_rank',
+          `Scanned all ${completed.toLocaleString()}/${total.toLocaleString()} nodes in ${(elapsedMs / 1000).toFixed(1)}s · Clean rate ${cleanPct}% · Best node ${bestClean.hostname} (${bestClean.latencyMs}ms, fake ${bestClean.lastFakeProbeCreds?.username ?? 'auto'})`
+        );
+      }
+    } catch (err) {
+      if ((err as Error)?.name !== 'AbortError') {
+        appendLog('ERROR', 'vpnban_pool', 'Fleet probe encountered an error; retaining completed batch telemetry');
+      }
     } finally {
+      scanAbortRef.current = null;
       setIsScanning(false);
     }
-  }, [appendLog, scanConfig, servers]);
+  }, [appendLog, isScanning, scanConfig, servers]);
 
   const runHandshakeTrace = useCallback(
     async (targetServer: VpnServer = selectedServer, simulateFault = false) => {
@@ -472,10 +516,12 @@ export default function App() {
             dataSource={dataSource}
             scanConfig={scanConfig}
             isScanning={isScanning}
+            scanProgress={scanProgress}
             lastScanDurationMs={lastScanDurationMs}
             selectedServerId={selectedServer.id}
             onUpdateConfig={(patch) => setScanConfig((prev) => ({ ...prev, ...patch }))}
             onRunScan={runFleetScan}
+            onStopScan={stopFleetScan}
             onSelectAndConnect={requestConnectToServer}
             onTraceServer={(srv) => {
               setSelectedServerId(srv.id);
