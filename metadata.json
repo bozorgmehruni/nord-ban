@@ -1,0 +1,6 @@
+{
+  "name": "NordVPN IKEv2 Explorer",
+  "description": "Engineering-grade VPN telemetry, vpnban-style wrong-credential IKEv2 server scanner, interactive world map, and Android 6.0+ project builder.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
