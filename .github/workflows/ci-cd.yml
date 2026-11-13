@@ -3,15 +3,15 @@ name: CI/CD Web & Android 6.0+ APK
 on:
   push:
     branches: [ main ]
-    tags: [ 'v*.*.*' ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to create (e.g. v1.0.0)'
+        description: 'Release tag to create (e.g. v.0.0.1 or v1.0.0)'
         required: false
-        default: 'v1.0.0'
+        default: 'v.0.0.1'
 
 permissions:
   contents: write
@@ -133,7 +133,7 @@ jobs:
             TAG="${GITHUB_REF#refs/tags/}"
           else
             TAG="${{ github.event.inputs.release_tag }}"
-            if [ -z "$TAG" ]; then TAG="v1.0.0"; fi
+            if [ -z "$TAG" ]; then TAG="v.0.0.1"; fi
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             if ! git rev-parse "$TAG" >/dev/null 2>&1; then

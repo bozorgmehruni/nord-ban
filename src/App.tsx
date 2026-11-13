@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Activity } from 'lucide-react';
 import { TopBar } from './components/TopBar';
 import { SimpleDashboard } from './components/SimpleDashboard';
 import { ProDashboard } from './components/ProDashboard';
@@ -6,6 +7,7 @@ import { ScannerView } from './components/ScannerView';
 import { WorldMapView } from './components/WorldMapView';
 import { DiagnosticsView } from './components/DiagnosticsView';
 import { VaultAndApkView } from './components/VaultAndApkView';
+import { ConnectCredentialsModal } from './components/ConnectCredentialsModal';
 import { FALLBACK_NORD_SERVERS } from './data/fallbackServers';
 import type {
   AppMode,
@@ -44,6 +46,7 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectionSeconds, setConnectionSeconds] = useState(0);
+  const [pendingConnectServer, setPendingConnectServer] = useState<VpnServer | null>(null);
 
   const [isScanning, setIsScanning] = useState(false);
   const [lastScanDurationMs, setLastScanDurationMs] = useState<number | null>(null);
@@ -55,7 +58,6 @@ export default function App() {
     timeoutMs: 2500,
     probePort: 500,
     useWrongCredentialCheck: true,
-    canaryUsername: 'vpnban_probe_canary',
     regionFilter: 'All',
   });
 
@@ -70,10 +72,8 @@ export default function App() {
   });
 
   const [vault, setVault] = useState<VaultCredentials>({
-    serviceUsername: 'nord_svc_6a8f92e4b1c',
-    servicePassword: '••••••••••••••••••••••••',
-    canaryUsername: 'vpnban_probe_canary',
-    canaryPassword: 'invalid_canary_pass_00',
+    serviceUsername: '',
+    servicePassword: '',
     rootCaVerified: true,
     rootCaFingerprint: '43:48:A0:E9:44:4C:78:CB:26:5E:05:8D:5E:89:44:B4:D8:4F:96:62',
     keystoreMode: 'Android Keystore AES-256-GCM (API 23+)',
@@ -96,8 +96,8 @@ export default function App() {
       id: 'init-2',
       timestamp: new Date().toISOString(),
       level: 'PROBE',
-      subsystem: 'vpnban_canary',
-      message: 'Wrong-credential pre-check enabled to isolate clean relays before real auth',
+      subsystem: 'vpnban_random_probe',
+      message: 'Scanner generates random fake usernames & passwords per relay; real password requested only on connect',
     },
   ]);
 
@@ -189,7 +189,7 @@ export default function App() {
     appendLog(
       'PROBE',
       'vpnban_pool',
-      `Starting ${scanConfig.workers}-worker async probe on UDP ${scanConfig.probePort} (timeout ${scanConfig.timeoutMs}ms, wrong-cred canary=${scanConfig.useWrongCredentialCheck})`
+      `Starting ${scanConfig.workers}-worker async probe on UDP ${scanConfig.probePort} (timeout ${scanConfig.timeoutMs}ms, random_fake_creds=${scanConfig.useWrongCredentialCheck})`
     );
     try {
       const res = await fetch('/api/scanner/probe', {
@@ -213,7 +213,7 @@ export default function App() {
           appendLog(
             'AUTH',
             'vpnban_rank',
-            `Scan completed in ${data.durationMs}ms · Clean rate ${data.cleanHandshakeRatePct}% · Best node ${bestClean.hostname} (${bestClean.latencyMs}ms, score ${bestClean.score})`
+            `Scan completed in ${data.durationMs}ms · Clean rate ${data.cleanHandshakeRatePct}% · Best node ${bestClean.hostname} (${bestClean.latencyMs}ms, fake ${bestClean.lastFakeProbeCreds?.username ?? 'auto'})`
           );
         }
       }
@@ -242,7 +242,6 @@ export default function App() {
             mtuBytes: tunnelSettings.mtuClamping ? tunnelSettings.mtuValue : 1500,
             natTEnabled: tunnelSettings.natTraversal,
             simulateCarrierFault: simulateFault,
-            canaryUsername: vault.canaryUsername,
           }),
         });
         const trace: HandshakeTrace = await res.json();
@@ -253,7 +252,7 @@ export default function App() {
           appendLog(
             'AUTH',
             'ike_auth',
-            `4-stage trace passed in ${trace.totalDurationMs}ms · Canary verified, real credentials ready`,
+            `4-stage trace passed in ${trace.totalDurationMs}ms · Random fake probe (${trace.randomFakeCreds.username}) verified clean`,
             targetServer.hostname
           );
         }
@@ -265,17 +264,24 @@ export default function App() {
         setIsTracing(false);
       }
     },
-    [appendLog, selectedServer, tunnelSettings.mtuClamping, tunnelSettings.mtuValue, tunnelSettings.natTraversal, vault.canaryUsername]
+    [appendLog, selectedServer, tunnelSettings.mtuClamping, tunnelSettings.mtuValue, tunnelSettings.natTraversal]
   );
 
-  const connectToServer = useCallback(
-    async (target: VpnServer) => {
+  const executeConnectWithCredentials = useCallback(
+    async (target: VpnServer, realUsername: string, realPassword: string) => {
       setSelectedServerId(target.id);
       setIsConnecting(true);
+      setVault((prev) => ({
+        ...prev,
+        serviceUsername: realUsername,
+        servicePassword: realPassword,
+        lastUpdated: new Date().toISOString(),
+      }));
+
       appendLog(
         'PROBE',
         'vpnban_gate',
-        `Running wrong-credential canary check on ${target.hostname} before committing real NordService credentials`
+        `Running random fake-credential gate on ${target.hostname} before submitting real NordService password`
       );
       const trace = await runHandshakeTrace(target, false);
       if (trace && trace.wrongCredCanaryPassed) {
@@ -283,7 +289,7 @@ export default function App() {
         appendLog(
           'AUTH',
           'tunnel_up',
-          `Connected via ${tunnelSettings.protocol} to ${target.hostname} (${target.ip}) using Keystore credentials`,
+          `Connected via ${tunnelSettings.protocol} to ${target.hostname} (${target.ip}) using real credentials for ${realUsername}`,
           target.hostname
         );
       } else {
@@ -292,7 +298,7 @@ export default function App() {
         appendLog(
           'ERROR',
           'vpnban_gate',
-          `Canary check flagged ${target.hostname} — real credentials withheld. Opened failure triage.`,
+          `Random fake-credential gate flagged ${target.hostname} — real password withheld. Opened failure triage.`,
           target.hostname
         );
       }
@@ -301,14 +307,19 @@ export default function App() {
     [appendLog, runHandshakeTrace, tunnelSettings.protocol]
   );
 
-  const handlePrimaryConnectToggle = useCallback(async () => {
+  const requestConnectToServer = useCallback((target: VpnServer) => {
+    setSelectedServerId(target.id);
+    setPendingConnectServer(target);
+  }, []);
+
+  const handlePrimaryConnectToggle = useCallback(() => {
     if (isConnected) {
       setIsConnected(false);
       appendLog('INFO', 'tunnel_down', `Closed ${tunnelSettings.protocol} SA with ${selectedServer.hostname}`);
       return;
     }
-    await connectToServer(selectedServer);
-  }, [appendLog, connectToServer, isConnected, selectedServer, tunnelSettings.protocol]);
+    setPendingConnectServer(selectedServer);
+  }, [appendLog, isConnected, selectedServer, tunnelSettings.protocol]);
 
   const handleApplyTriage = useCallback(
     async (actionId: FailureTriage['recommendedActions'][number]['id']) => {
@@ -331,11 +342,15 @@ export default function App() {
             .sort((a, b) => b.score - a.score)[0] ?? servers[0];
         if (bestClean) {
           appendLog('INFO', 'triage_reroute', `Auto-rerouting to clean relay ${bestClean.hostname} (score ${bestClean.score})`);
-          await connectToServer(bestClean);
+          if (vault.serviceUsername.trim() && vault.servicePassword.trim()) {
+            await executeConnectWithCredentials(bestClean, vault.serviceUsername, vault.servicePassword);
+          } else {
+            setPendingConnectServer(bestClean);
+          }
         }
       }
     },
-    [appendLog, connectToServer, runHandshakeTrace, selectedServer, servers]
+    [appendLog, executeConnectWithCredentials, runHandshakeTrace, selectedServer, servers, vault.servicePassword, vault.serviceUsername]
   );
 
   const handleProtocolSwitch = useCallback(
@@ -367,7 +382,7 @@ export default function App() {
   }, [appendLog, handshakeTrace, isConnected, logs, selectedServer, tunnelSettings]);
 
   return (
-    <div className="min-h-screen bg-[#080C14] text-[#F8FAFC] pb-24 lg:pb-12">
+    <div className="min-h-screen bg-[#0f131c] text-[#dfe2ee] pb-24 lg:pb-12">
       <TopBar
         activeTab={activeTab}
         onSelectTab={setActiveTab}
@@ -379,12 +394,12 @@ export default function App() {
       <main className="mx-auto max-w-7xl px-4 sm:px-6 pt-6 space-y-6">
         {/* Workspace Toolbar (Mode Switch + Active Relay Context) */}
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/10 pb-4">
-          <div className="flex items-center gap-3 text-xs text-[#94A3B8]">
-            <span className="font-medium text-[#F8FAFC]">
+          <div className="flex items-center gap-3 text-xs text-[#c2c6d7]">
+            <span className="font-semibold text-[#dfe2ee]">
               {selectedServer.city}, {selectedServer.countryCode}
             </span>
             <span aria-hidden="true">·</span>
-            <span className="font-mono">{selectedServer.hostname}</span>
+            <span className="font-mono text-[#c2c6d7]">{selectedServer.hostname}</span>
             <span aria-hidden="true">·</span>
             <span className="font-mono tabular-nums text-[#00E5FF]">
               {selectedServer.latencyMs ?? 24} ms
@@ -392,14 +407,14 @@ export default function App() {
           </div>
 
           {activeTab === 'dashboard' && (
-            <div className="flex items-center gap-1 p-1 rounded-lg bg-[#0D1321] border border-white/10">
+            <div className="flex items-center gap-1 p-1 rounded-lg obsidian-inset">
               <button
                 type="button"
                 onClick={() => setAppMode('simple')}
                 className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
                   appMode === 'simple'
                     ? 'bg-[#2979FF] text-[#F8FAFC]'
-                    : 'text-[#94A3B8] hover:text-[#F8FAFC]'
+                    : 'text-[#c2c6d7] hover:text-[#dfe2ee]'
                 }`}
               >
                 Simple Mode
@@ -410,7 +425,7 @@ export default function App() {
                 className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
                   appMode === 'pro'
                     ? 'bg-[#2979FF] text-[#F8FAFC]'
-                    : 'text-[#94A3B8] hover:text-[#F8FAFC]'
+                    : 'text-[#c2c6d7] hover:text-[#dfe2ee]'
                 }`}
               >
                 Pro Telemetry
@@ -461,7 +476,7 @@ export default function App() {
             selectedServerId={selectedServer.id}
             onUpdateConfig={(patch) => setScanConfig((prev) => ({ ...prev, ...patch }))}
             onRunScan={runFleetScan}
-            onSelectAndConnect={connectToServer}
+            onSelectAndConnect={requestConnectToServer}
             onTraceServer={(srv) => {
               setSelectedServerId(srv.id);
               setActiveTab('diagnostics');
@@ -476,7 +491,7 @@ export default function App() {
             selectedServer={selectedServer}
             isConnected={isConnected}
             onSelectServer={(srv) => setSelectedServerId(srv.id)}
-            onConnectServer={connectToServer}
+            onConnectServer={requestConnectToServer}
             onTraceServer={(srv) => {
               setSelectedServerId(srv.id);
               setActiveTab('diagnostics');
@@ -511,6 +526,38 @@ export default function App() {
           />
         )}
       </main>
+
+      {/* Stitch Floating Diagnostics Probe Trigger (56x56, 16px radius) */}
+      {activeTab !== 'diagnostics' && (
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab('diagnostics');
+            runHandshakeTrace(selectedServer, false);
+          }}
+          aria-label="Run quick 4-stage ISAKMP probe"
+          title="Run 4-Stage ISAKMP Probe"
+          className="fixed bottom-20 right-4 lg:bottom-6 lg:right-6 z-30 w-14 h-14 rounded-2xl bg-[#2979FF] hover:bg-[#1E66E5] text-[#F8FAFC] flex items-center justify-center obsidian-halo-blue transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00E5FF]"
+        >
+          <Activity className="w-6 h-6" />
+        </button>
+      )}
+
+      {/* Real NordService Username & Password Gate Modal when Connecting */}
+      {pendingConnectServer && (
+        <ConnectCredentialsModal
+          server={pendingConnectServer}
+          initialUsername={vault.serviceUsername}
+          initialPassword={vault.servicePassword}
+          isConnecting={isConnecting}
+          onCancel={() => setPendingConnectServer(null)}
+          onConfirmConnect={async (username, password) => {
+            const target = pendingConnectServer;
+            setPendingConnectServer(null);
+            await executeConnectWithCredentials(target, username, password);
+          }}
+        />
+      )}
     </div>
   );
 }

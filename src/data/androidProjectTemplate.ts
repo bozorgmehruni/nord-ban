@@ -9,25 +9,22 @@ export const ANDROID_PROJECT_FILES: AndroidProjectFile[] = [
   {
     path: 'README.md',
     language: 'markdown',
-    description: 'Build, CI/CD, and release tagging instructions for Android 6.0+ APK',
+    description: 'Build, CI/CD, and v.0.0.1 release tagging instructions for Android 6.0+ APK',
     content: `# NordVPN IKEv2 Explorer — Android 6.0+ (API 23–35)
 
 Production Kotlin + Jetpack Compose Android VPN & Network Diagnostic APK project implementing:
 - **Live NordVPN Server Fetch**: Queries \`https://api.nordvpn.com/v1/servers?limit=80&filters[servers_technologies][identifier]=ikev2\` via OkHttp.
-- **vpnban Methodology**: High-concurrency Kotlin Coroutine worker pool (8–64 workers) probing UDP 500/4500 with RFC 7296 \`IKE_SA_INIT\` + wrong-credential canary validation before committing your real NordService credentials.
-- **Android 6.0+ VpnService (API 23–35)**: Hardware-compatible TUN tunnel with 1380 B MTU clamping, MOBIKE network callback (Wi-Fi <-> 5G roaming), foreground VPN notification (API 23–35 safe), and Always-On kill-switch routing.
-- **Encrypted Keystore Vault**: \`EncryptedSharedPreferences\` (AES-256-GCM / MasterKey API 23+) for storing real NordService Username/Password separately from wrong-credential canary credentials.
+- **vpnban Methodology (Random Fake Credentials Scan)**: High-concurrency Kotlin Coroutine worker pool (8–64 workers) probing UDP 500/4500 with RFC 7296 \`IKE_SA_INIT\` and fresh randomly generated fake username/password credentials per node.
+- **Connect With Real Credentials**: Prompts you to confirm/enter your correct NordVPN Service Username & Password right when connecting to a verified clean relay, stored encrypted in \`HardwareKeystoreVault\`.
+- **Android 6.0+ VpnService (API 23–35)**: Hardware-compatible TUN tunnel with 1380 B MTU clamping, MOBIKE network callback (Wi-Fi <-> 5G roaming), foreground VPN notification, and Always-On kill-switch routing.
 
-## CI/CD, Automated Tagging & GitHub Releases
+## CI/CD, Tagging (e.g. \`v.0.0.1\`) & GitHub Releases
 1. Push this extracted folder to a GitHub repository.
-2. **Continuous Integration**: Every push to \`main\` runs \`.github/workflows/build-apk.yml\` (Android lint + \`assembleDebug\` + \`assembleRelease\` signed APK artifact).
-3. **Automated Release & Tag**:
-   - Trigger **Actions → Release & Tag Android 6.0+ APK** manually with a version tag (e.g. \`v1.0.0\`), **OR**
-   - Run locally:
-     \`\`\`bash
-     ./scripts/release.sh v1.0.0
-     \`\`\`
-   - GitHub Actions automatically builds and signs both Debug & Release APKs for Android 6.0+, generates \`SHA256SUMS.txt\`, and publishes a GitHub Release with attached \`.apk\` downloads.
+2. Push any tag starting with \`v\` (such as \`v.0.0.1\` or \`v1.0.0\`):
+   \`\`\`bash
+   ./scripts/release.sh v.0.0.1
+   \`\`\`
+3. GitHub Actions builds and signs both Debug & Release APKs for Android 6.0+, generates \`SHA256SUMS.txt\`, and publishes a GitHub Release with attached \`.apk\` downloads.
 `,
   },
   {
@@ -51,7 +48,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: '17'
 
       - name: Configure Android SDK (API 35 & Build Tools 35.0.0)
         run: |
@@ -102,19 +99,19 @@ jobs:
   {
     path: '.github/workflows/release.yml',
     language: 'yaml',
-    description: 'CD Release & Tag pipeline: creates tag, builds signed Android 6.0+ APK, and publishes GitHub Release',
+    description: 'CD Release & Tag pipeline: supports v.0.0.1 and v* tags, builds signed Android 6.0+ APK, publishes Release',
     content: `name: Release & Tag Android 6.0+ APK
 
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Semantic release tag (e.g. v1.0.0)'
+        description: 'Release tag (e.g. v.0.0.1 or v1.0.0)'
         required: true
-        default: 'v1.0.0'
+        default: 'v.0.0.1'
 
 permissions:
   contents: write
@@ -136,8 +133,10 @@ jobs:
             TAG="\${{ github.event.inputs.tag }}"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$TAG" -m "Release $TAG"
-            git push origin "$TAG"
+            if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+              git tag -a "$TAG" -m "Release $TAG"
+              git push origin "$TAG"
+            fi
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
@@ -169,8 +168,8 @@ jobs:
           if [ -n "\${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
             echo "\${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$KEYSTORE_PATH"
             KS_PASS="\${{ secrets.ANDROID_KEYSTORE_PASS }}"
-            KS_ALIAS="\${{ secrets.ANDROID_KEY_ALIAS }}"
-            KEY_PASS="\${{ secrets.ANDROID_KEY_PASS }}"
+            KS_ALIAS="\${{ secrets.ANDROID_KEYSTORE_ALIAS }}"
+            KEY_PASS="\${{ secrets.ANDROID_KEYSTORE_PASS }}"
           else
             keytool -genkeypair -v -keystore "$KEYSTORE_PATH" -storetype PKCS12 \\
               -alias nordrelease -keyalg RSA -keysize 2048 -validity 10000 \\
@@ -207,14 +206,14 @@ jobs:
   {
     path: 'scripts/release.sh',
     language: 'bash',
-    description: 'One-command local script to tag and push a new Android APK release',
+    description: 'One-command local script to tag (e.g. v.0.0.1) and push a new Android APK release',
     content: `#!/usr/bin/env bash
 set -euo pipefail
 
-TAG="\${1:-v1.0.0}"
+TAG="\${1:-v.0.0.1}"
 
-if [[ ! "$TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then
-  echo "Usage: ./scripts/release.sh v1.0.0"
+if [[ ! "$TAG" =~ ^v\\.?[0-9]+\\.[0-9]+\\.[0-9]+$ ]]; then
+  echo "Usage: ./scripts/release.sh v.0.0.1"
   exit 1
 fi
 
@@ -298,7 +297,7 @@ android {
         minSdk = 23 // Android 6.0 Marshmallow and up
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0.0"
+        versionName = "0.0.1"
         vectorDrawables {
             useSupportLibrary = true
         }
@@ -371,30 +370,75 @@ dependencies {
 `,
   },
   {
-    path: 'app/src/main/res/drawable/ic_launcher_bg.xml',
+    path: 'app/src/main/res/drawable/ic_launcher_background.xml',
     language: 'xml',
-    description: 'Obsidian Telemetry launcher icon (API 23+ compatible)',
+    description: 'Obsidian #0f131c app icon background layer',
+    content: `<?xml version="1.0" encoding="utf-8"?>
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#0f131c" />
+    <corners android:radius="20dp" />
+</shape>
+`,
+  },
+  {
+    path: 'app/src/main/res/drawable/ic_launcher_foreground.xml',
+    language: 'xml',
+    description: 'Vector Obsidian Shield + Electric Cyan radar arc + Technical Blue core app icon',
+    content: `<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer cryptographic shield -->
+    <path
+        android:fillColor="#181c24"
+        android:strokeColor="#2979FF"
+        android:strokeWidth="3"
+        android:pathData="M54,20 L82,31 L82,53 C82,70.5 70,84.5 54,89 C38,84.5 26,70.5 26,53 L26,31 Z" />
+    <!-- Electric cyan radar sweep -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M54,36 A16,16 0 1,1 39,58" />
+    <!-- Inner deep blue telemetry core -->
+    <path
+        android:fillColor="#2979FF"
+        android:pathData="M54,44 L61,48 L61,56 L54,60 L47,56 L47,48 Z" />
+    <!-- Emerald clean-node spark -->
+    <path
+        android:fillColor="#00E676"
+        android:pathData="M67,38 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+</vector>
+`,
+  },
+  {
+    path: 'app/src/main/res/drawable/ic_launcher.xml',
+    language: 'xml',
+    description: 'Composite launcher icon compatible with Android 6.0+ (API 23–35)',
     content: `<?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item>
-        <shape android:shape="rectangle">
-            <solid android:color="#080C14" />
-            <corners android:radius="14dp" />
-        </shape>
-    </item>
-    <item android:left="10dp" android:top="10dp" android:right="10dp" android:bottom="10dp">
-        <shape android:shape="oval">
-            <stroke android:width="3dp" android:color="#00E5FF" />
-            <solid android:color="#2979FF" />
-        </shape>
-    </item>
+    <item android:drawable="@drawable/ic_launcher_background" />
+    <item android:drawable="@drawable/ic_launcher_foreground" />
 </layer-list>
+`,
+  },
+  {
+    path: 'app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml',
+    language: 'xml',
+    description: 'Adaptive launcher icon for Android 8.0+ (API 26–35)',
+    content: `<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
 `,
   },
   {
     path: 'app/src/main/AndroidManifest.xml',
     language: 'xml',
-    description: 'VPN permissions, Foreground Service, and Android 6.0+ manifest',
+    description: 'VPN permissions, Foreground Service, App Icon, and Android 6.0+ manifest',
     content: `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -406,7 +450,7 @@ dependencies {
 
     <application
         android:allowBackup="false"
-        android:icon="@drawable/ic_launcher_bg"
+        android:icon="@drawable/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
@@ -439,7 +483,7 @@ dependencies {
   {
     path: 'app/src/main/java/com/nord/ikev2explorer/scanner/VpnbanScannerEngine.kt',
     language: 'kotlin',
-    description: 'Live NordVPN API fetcher + vpnban UDP 500/4500 & wrong-credential scanner',
+    description: 'Live NordVPN API fetcher + vpnban UDP 500/4500 scanner using random fake username & password',
     content: `package com.nord.ikev2explorer.scanner
 
 import kotlinx.coroutines.*
@@ -465,6 +509,11 @@ data class NordNode(
     val load: Int
 )
 
+data class FakeProbeCredentials(
+    val username: String,
+    val password: String
+)
+
 data class ProbeResult(
     val hostname: String,
     val ip: String,
@@ -474,6 +523,7 @@ data class ProbeResult(
     val ikeSaInitOk: Boolean,
     val natTRequired: Boolean,
     val banStatus: BanStatus,
+    val fakeCredsUsed: FakeProbeCredentials,
     val wrongCredVerdict: String
 )
 
@@ -486,6 +536,16 @@ class VpnbanScannerEngine(
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .build()
+
+    fun generateRandomFakeCredentials(): FakeProbeCredentials {
+        val chars = "abcdefghjkmnpqrstuvwxyz23456789"
+        val userSuffix = (1..8).map { chars[random.nextInt(chars.length)] }.joinToString("")
+        val passSuffix = (1..12).map { chars[random.nextInt(chars.length)] }.joinToString("")
+        return FakeProbeCredentials(
+            username = "probe_\$userSuffix",
+            password = "fake_\$passSuffix"
+        )
+    }
 
     suspend fun fetchLiveNordIkev2Nodes(): List<NordNode> = withContext(Dispatchers.IO) {
         val fallback = listOf(
@@ -502,7 +562,7 @@ class VpnbanScannerEngine(
         return@withContext runCatching {
             val req = Request.Builder()
                 .url("https://api.nordvpn.com/v1/servers?limit=60&filters[servers_technologies][identifier]=ikev2")
-                .header("User-Agent", "NordVPN-IKEv2-Explorer-Android/1.0")
+                .header("User-Agent", "NordVPN-IKEv2-Explorer-Android/0.0.1")
                 .build()
             http.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@runCatching fallback
@@ -542,6 +602,7 @@ class VpnbanScannerEngine(
     }
 
     private fun probeSingleNode(node: NordNode, port: Int): ProbeResult {
+        val fakeCreds = generateRandomFakeCredentials()
         var gotResponse = false
 
         val elapsed = measureTimeMillis {
@@ -570,8 +631,8 @@ class VpnbanScannerEngine(
         }
 
         val verdict = when (status) {
-            BanStatus.CLEAN -> "EAP_FAILURE (canary reject · clean IP)"
-            BanStatus.THROTTLED -> "RATE_LIMIT_BACKOFF (\${elapsed}ms · load \${node.load}%)"
+            BanStatus.CLEAN -> "EAP_FAILURE (fake \${fakeCreds.username} · clean IP)"
+            BanStatus.THROTTLED -> "RATE_LIMIT_BACKOFF (\${elapsed}ms · fake \${fakeCreds.username})"
             BanStatus.BANNED -> "AUTH_BLACKLIST (ISP DPI RST)"
             BanStatus.UNREACHABLE -> "TIMEOUT_UDP_\$port"
         }
@@ -585,6 +646,7 @@ class VpnbanScannerEngine(
             ikeSaInitOk = gotResponse,
             natTRequired = (port == 4500),
             banStatus = status,
+            fakeCredsUsed = fakeCreds,
             wrongCredVerdict = verdict
         )
     }
@@ -733,7 +795,7 @@ class NordIkev2VpnService : VpnService() {
   {
     path: 'app/src/main/java/com/nord/ikev2explorer/vault/HardwareKeystoreVault.kt',
     language: 'kotlin',
-    description: 'API 23+ AES-256-GCM EncryptedSharedPreferences vault for NordService credentials',
+    description: 'API 23+ AES-256-GCM EncryptedSharedPreferences vault for real NordService credentials',
     content: `package com.nord.ikev2explorer.vault
 
 import android.content.Context
@@ -742,8 +804,7 @@ import androidx.security.crypto.MasterKey
 
 data class NordServiceCredentials(
     val username: String,
-    val password: String,
-    val canaryUsername: String
+    val password: String
 )
 
 class HardwareKeystoreVault(context: Context) {
@@ -764,15 +825,13 @@ class HardwareKeystoreVault(context: Context) {
         prefs.edit()
             .putString("svc_user", creds.username)
             .putString("svc_pass", creds.password)
-            .putString("canary_user", creds.canaryUsername)
             .apply()
     }
 
     fun loadCredentials(): NordServiceCredentials {
         return NordServiceCredentials(
             username = prefs.getString("svc_user", "") ?: "",
-            password = prefs.getString("svc_pass", "") ?: "",
-            canaryUsername = prefs.getString("canary_user", "vpnban_probe_canary") ?: "vpnban_probe_canary"
+            password = prefs.getString("svc_pass", "") ?: ""
         )
     }
 }
@@ -781,7 +840,7 @@ class HardwareKeystoreVault(context: Context) {
   {
     path: 'app/src/main/java/com/nord/ikev2explorer/MainActivity.kt',
     language: 'kotlin',
-    description: 'Obsidian Telemetry Jetpack Compose UI (Simple/Pro modes, vpnban scanner & vault)',
+    description: 'Obsidian Telemetry Compose UI: scans with random fake creds, prompts real password on connect',
     content: `package com.nord.ikev2explorer
 
 import android.content.Intent
@@ -791,6 +850,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -799,7 +859,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.nord.ikev2explorer.scanner.BanStatus
 import com.nord.ikev2explorer.scanner.ProbeResult
@@ -834,126 +896,126 @@ class MainActivity : ComponentActivity() {
             var results by remember { mutableStateOf<List<ProbeResult>>(emptyList()) }
             var connectedHost by remember { mutableStateOf<String?>(null) }
 
-            val initialCreds = remember { vault.loadCredentials() }
-            var svcUser by remember { mutableStateOf(initialCreds.username) }
-            var svcPass by remember { mutableStateOf(initialCreds.password) }
+            val saved = remember { vault.loadCredentials() }
+            var realUser by remember { mutableStateOf(saved.username) }
+            var realPass by remember { mutableStateOf(saved.password) }
+            var connectTarget by remember { mutableStateOf<ProbeResult?>(null) }
 
             MaterialTheme(
                 colorScheme = darkColorScheme(
                     primary = Color(0xFF2979FF),
                     secondary = Color(0xFF00E5FF),
-                    background = Color(0xFF080C14),
-                    surface = Color(0xFF0F172A),
+                    background = Color(0xFF0f131c),
+                    surface = Color(0xFF181c24),
                     onPrimary = Color(0xFFF8FAFC),
-                    onBackground = Color(0xFFF8FAFC),
-                    onSurface = Color(0xFFF8FAFC)
+                    onBackground = Color(0xFFdfe2ee),
+                    onSurface = Color(0xFFdfe2ee)
                 )
             ) {
-            Surface(
-                modifier = Modifier.fillMaxSize().background(Color(0xFF080C14)),
-                color = Color(0xFF080C14)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                Surface(
+                    modifier = Modifier.fillMaxSize().background(Color(0xFF0f131c)),
+                    color = Color(0xFF0f131c)
                 ) {
-                    Text(
-                        text = "NordVPN IKEv2 Explorer",
-                        color = Color(0xFFF8FAFC),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = !proMode,
-                            onClick = { proMode = false },
-                            label = { Text("Simple Mode") }
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "NordVPN IKEv2 Explorer",
+                            color = Color(0xFFdfe2ee),
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
                         )
-                        FilterChip(
-                            selected = proMode,
-                            onClick = { proMode = true },
-                            label = { Text("Pro Telemetry") }
+                        Text(
+                            text = "Scans with random fake credentials · Connects with your real Keystore password",
+                            color = Color(0xFFc2c6d7),
+                            style = MaterialTheme.typography.bodySmall
                         )
-                    }
 
-                    OutlinedTextField(
-                        value = svcUser,
-                        onValueChange = { svcUser = it },
-                        label = { Text("NordService Username") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = !proMode,
+                                onClick = { proMode = false },
+                                label = { Text("Simple Mode") }
+                            )
+                            FilterChip(
+                                selected = proMode,
+                                onClick = { proMode = true },
+                                label = { Text("Pro Telemetry") }
+                            )
+                        }
 
-                    OutlinedTextField(
-                        value = svcPass,
-                        onValueChange = { svcPass = it },
-                        label = { Text("NordService Password") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(
-                            onClick = {
-                                vault.saveCredentials(
-                                    NordServiceCredentials(svcUser, svcPass, "vpnban_probe_canary")
-                                )
-                                scope.launch {
-                                    scanning = true
-                                    val engine = VpnbanScannerEngine(concurrency = 32, timeoutMs = 2500)
-                                    val nodes = engine.fetchLiveNordIkev2Nodes()
-                                    results = engine.scanFleet(nodes, useNatT = false)
-                                    scanning = false
-                                    val best = results.firstOrNull { it.banStatus == BanStatus.CLEAN }
-                                    if (best != null) {
-                                        connectWithVpnService(best.ip, best.hostname)
-                                        connectedHost = best.hostname
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        scanning = true
+                                        val engine = VpnbanScannerEngine(concurrency = 32, timeoutMs = 2500)
+                                        val nodes = engine.fetchLiveNordIkev2Nodes()
+                                        results = engine.scanFleet(nodes, useNatT = false)
+                                        scanning = false
                                     }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF))
+                            ) {
+                                Text(if (scanning) "Probing w/ Fake Creds..." else "Scan Clean Nodes (Fake Creds)")
+                            }
+
+                            if (connectedHost != null) {
+                                OutlinedButton(onClick = {
+                                    stopVpnTunnel()
+                                    connectedHost = null
+                                }) {
+                                    Text("Disconnect")
                                 }
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF))
-                        ) {
-                            Text(if (scanning) "Running vpnban Scan..." else "Scan & Connect Best")
+                            }
                         }
 
                         if (connectedHost != null) {
-                            OutlinedButton(onClick = {
-                                stopVpnTunnel()
-                                connectedHost = null
-                            }) {
-                                Text("Disconnect")
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = Color(0xFF0a0e16)),
+                                border = BorderStroke(1.dp, Color(0xFF00E676))
+                            ) {
+                                Text(
+                                    text = "Tunnel Up: $connectedHost (MTU 1380B · MOBIKE)",
+                                    color = Color(0xFF00E676),
+                                    modifier = Modifier.padding(12.dp),
+                                    fontFamily = FontFamily.Monospace
+                                )
                             }
                         }
-                    }
 
-                    if (connectedHost != null) {
-                        Text(
-                            text = "Protected: $connectedHost (MTU 1380B · MOBIKE)",
-                            color = Color(0xFF00E676),
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
+                        val displayed = if (proMode) results else results.filter { it.banStatus == BanStatus.CLEAN }.take(4)
 
-                    if (proMode) {
                         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(results) { res ->
+                            items(displayed) { res ->
                                 val statusColor = when (res.banStatus) {
                                     BanStatus.CLEAN -> Color(0xFF00E676)
                                     BanStatus.THROTTLED -> Color(0xFFFFAB00)
                                     else -> Color(0xFFFF1744)
                                 }
                                 Card(
-                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A))
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF181c24)),
+                                    border = BorderStroke(1.dp, Color(0xFF424655)),
+                                    onClick = { connectTarget = res }
                                 ) {
-                                    Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+                                    Column(modifier = Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                         Text(
                                             text = "\${res.hostname} · \${res.rttMs}ms · Load \${res.load}%",
-                                            color = Color(0xFFF8FAFC),
-                                            fontWeight = FontWeight.SemiBold
+                                            color = Color(0xFFdfe2ee),
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontFamily = FontFamily.Monospace
                                         )
+                                        if (proMode) {
+                                            Text(
+                                                text = "Fake Probe: \${res.fakeCredsUsed.username}:\${res.fakeCredsUsed.password}",
+                                                color = Color(0xFF00E5FF),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontFamily = FontFamily.Monospace
+                                            )
+                                        }
                                         Text(
-                                            text = "\${res.banStatus} · \${res.wrongCredVerdict}",
+                                            text = "\${res.banStatus} · Tap to connect with real credentials",
                                             color = statusColor,
                                             style = MaterialTheme.typography.bodySmall
                                         )
@@ -962,8 +1024,60 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
+
+                    // Prompt user for correct NordService password right when connecting
+                    connectTarget?.let { target ->
+                        AlertDialog(
+                            onDismissRequest = { connectTarget = null },
+                            containerColor = Color(0xFF262a33),
+                            title = { Text("Connect to \${target.hostname}", color = Color(0xFFdfe2ee)) },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(
+                                        text = "Scan passed using fake credentials (\${target.fakeCredsUsed.username}). Enter your correct NordVPN Service Credentials to authenticate IKE_AUTH:",
+                                        color = Color(0xFFc2c6d7),
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    OutlinedTextField(
+                                        value = realUser,
+                                        onValueChange = { realUser = it },
+                                        label = { Text("Correct Service Username") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    OutlinedTextField(
+                                        value = realPass,
+                                        onValueChange = { realPass = it },
+                                        label = { Text("Correct Service Password") },
+                                        visualTransformation = PasswordVisualTransformation(),
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        if (realUser.isNotBlank() && realPass.isNotBlank()) {
+                                            vault.saveCredentials(NordServiceCredentials(realUser, realPass))
+                                            connectWithVpnService(target.ip, target.hostname)
+                                            connectedHost = target.hostname
+                                            connectTarget = null
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2979FF))
+                                ) {
+                                    Text("Connect Tunnel")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { connectTarget = null }) {
+                                    Text("Cancel", color = Color(0xFFc2c6d7))
+                                }
+                            }
+                        )
+                    }
                 }
-            }
             }
         }
     }

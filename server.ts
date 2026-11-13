@@ -242,12 +242,23 @@ function probeTcp443(ip: string, timeoutMs: number): Promise<{ ok: boolean; rttM
   });
 }
 
+function generateRandomFakeCredentials(): { username: string; password: string } {
+  const userHex = crypto.randomBytes(4).toString('hex');
+  const passHex = crypto.randomBytes(6).toString('base64url');
+  return {
+    username: `probe_${userHex}`,
+    password: `fake_${passHex}`,
+  };
+}
+
 async function probeServerNode(
   server: VpnServer,
   probePort: 500 | 4500,
   timeoutMs: number,
   useWrongCredentials: boolean
 ): Promise<VpnServer> {
+  const fakeCreds = generateRandomFakeCredentials();
+
   // 1. DNS check
   let resolvedIp = server.ip;
   try {
@@ -316,11 +327,14 @@ async function probeServerNode(
     jitterMs,
     packetLossPct: loss,
     banStatus,
-    wrongCredResponse,
+    wrongCredResponse: useWrongCredentials
+      ? `${wrongCredResponse} [fake ${fakeCreds.username}:${fakeCreds.password}]`
+      : wrongCredResponse,
     ikeSaInitOk: ikeOk || banStatus !== 'unreachable',
     natTRequired: probePort === 4500 || server.natTRequired,
     probeMethod: method,
     lastProbedAt: new Date().toISOString(),
+    lastFakeProbeCreds: fakeCreds,
     score,
   };
 }
@@ -399,19 +413,18 @@ async function startServer() {
       mtuBytes = 1380,
       natTEnabled = true,
       simulateCarrierFault = false,
-      canaryUsername = 'vpnban_probe_canary',
     } = req.body as {
       server?: VpnServer;
       probePort?: 500 | 4500;
       mtuBytes?: number;
       natTEnabled?: boolean;
       simulateCarrierFault?: boolean;
-      canaryUsername?: string;
     };
 
     const target = server ?? FALLBACK_NORD_SERVERS[0];
     const startedAt = new Date().toISOString();
     const { spiHex } = buildIkeSaInitPacket(probePort === 4500 ? 4500 : 500);
+    const fakeCreds = generateRandomFakeCredentials();
 
     // Stage 1: Real DNS resolution timing
     const dnsStart = performance.now();
@@ -464,14 +477,14 @@ async function startServer() {
       },
       {
         id: 'ike_auth',
-        label: 'IKE_AUTH & Wrong-Cred Canary',
+        label: 'IKE_AUTH & Random Fake-Cred Canary',
         detail:
           target.banStatus === 'banned'
-            ? `Canary "${canaryUsername}" triggered DPI reset — node flagged, aborting real auth`
-            : `Canary "${canaryUsername}" returned clean EAP_FAILURE -> Real NordService cert & EAP-MSCHAPv2 verified`,
+            ? `Random fake creds (${fakeCreds.username} / ${fakeCreds.password}) triggered DPI reset — node flagged, withholding real password`
+            : `Random fake creds (${fakeCreds.username} / ${fakeCreds.password}) returned clean EAP_FAILURE -> Ready for real NordService credentials`,
         status: target.banStatus === 'banned' ? 'failed' : hasCarrierFault ? 'warning' : 'passed',
         durationMs: Math.round(probeMs * 1.8),
-        packetHex: `CERT_REQ: CN=NordVPN Root CA (DigiCert) -> EAP_SUCCESS [TUNNEL_UP]`,
+        packetHex: `FAKE_AUTH: ${fakeCreds.username}:${fakeCreds.password} -> EAP_FAILURE [CLEAN_IP_VERIFIED]`,
       },
     ];
 
@@ -482,11 +495,11 @@ async function startServer() {
             code: target.banStatus === 'banned' ? 'ERR_ISP_DPI_BAN' : 'ERR_CARRIER_NAT_MTU',
             title:
               target.banStatus === 'banned'
-                ? 'Gateway Flagged During Wrong-Credential Canary Probe'
+                ? 'Gateway Flagged During Random Fake-Credential Probe'
                 : 'Carrier UDP NAT Filtering or MTU Fragmentation Detected',
             explanation:
               target.banStatus === 'banned'
-                ? `The vpnban canary check detected connection resets on ${target.hostname}. Real NordVPN credentials were withheld automatically to prevent account rate-limiting.`
+                ? `The vpnban random-credential probe (${fakeCreds.username}) detected connection resets on ${target.hostname}. Your real NordVPN credentials were withheld automatically.`
                 : `Mobile carrier NAT dropped ESP frames above 1380B or filtered raw UDP 500. Enable NAT-T UDP 4500 encapsulation and clamp tunnel MTU to 1380 B.`,
             recommendedActions: [
               {
@@ -523,16 +536,17 @@ async function startServer() {
       mtuBytes,
       natTActive: natTEnabled,
       wrongCredCanaryPassed: target.banStatus !== 'banned',
+      randomFakeCreds: fakeCreds,
       stages,
       triage,
       rawLogs: [
-        `[${startedAt}] vpnban_canary: probing ${target.hostname} (${resolvedIp}) with decoy user "${canaryUsername}"`,
+        `[${startedAt}] vpnban_scan: probing ${target.hostname} (${resolvedIp}) with random fake user="${fakeCreds.username}" pass="${fakeCreds.password}"`,
         `[${startedAt}] dns_lookup: resolved ${target.hostname} -> ${resolvedIp} in ${dnsMs}ms`,
         `[${startedAt}] ike_sa_init: Initiator SPI=${spiHex} port=${natTEnabled ? 4500 : 500} mtu=${mtuBytes}B`,
-        `[${startedAt}] canary_verdict: ${target.wrongCredResponse}`,
+        `[${startedAt}] fake_cred_verdict: ${target.wrongCredResponse}`,
         ...(triage
           ? [`[${startedAt}] triage_alert: ${triage.code} - ${triage.title}`]
-          : [`[${startedAt}] ike_auth: Root CA DigiCert/NordVPN chain verified · EAP-MSCHAPv2 authenticated`]),
+          : [`[${startedAt}] ike_auth: Root CA DigiCert/NordVPN verified · Prompting/using real NordService password`]),
       ],
     };
 

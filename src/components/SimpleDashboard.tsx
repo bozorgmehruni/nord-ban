@@ -37,7 +37,7 @@ export const SimpleDashboard: React.FC<SimpleDashboardProps> = ({
   return (
     <div className="space-y-8">
       {/* Primary Single-Anchor Protection Card */}
-      <section className="rounded-2xl border border-white/10 bg-[#0F172A] p-6 sm:p-10">
+      <section className="rounded-2xl obsidian-card p-6 sm:p-10">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
           <div className="lg:col-span-7 space-y-5">
             <div className="flex items-center gap-3 text-sm">
@@ -47,16 +47,16 @@ export const SimpleDashboard: React.FC<SimpleDashboardProps> = ({
                   Tunnel Protected
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-2 font-medium text-[#94A3B8]">
-                  <Shield className="w-4 h-4 text-[#94A3B8]" />
+                <span className="inline-flex items-center gap-2 font-medium text-[#c2c6d7]">
+                  <Shield className="w-4 h-4 text-[#8c90a0]" />
                   Unprotected Standby
                 </span>
               )}
-              <span className="text-[#64748B]" aria-hidden="true">·</span>
-              <span className="text-[#94A3B8] tabular-nums">{tunnelSettings.protocol}</span>
+              <span className="text-[#8c90a0]" aria-hidden="true">·</span>
+              <span className="text-[#c2c6d7] tabular-nums">{tunnelSettings.protocol}</span>
               {isConnected && (
                 <>
-                  <span className="text-[#64748B]" aria-hidden="true">·</span>
+                  <span className="text-[#8c90a0]" aria-hidden="true">·</span>
                   <span className="font-mono text-[#00E5FF] tabular-nums">
                     {formatDuration(connectionSeconds)}
                   </span>
@@ -64,16 +64,16 @@ export const SimpleDashboard: React.FC<SimpleDashboardProps> = ({
               )}
             </div>
 
-            <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-[#F8FAFC] text-balance">
+            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight text-[#dfe2ee] text-balance">
               {isConnected
                 ? `Connected to ${selectedServer.city}, ${selectedServer.countryCode}`
                 : 'Fast 1-tap IKEv2 protection on verified clean relays'}
             </h1>
 
-            <p className="text-sm sm:text-base text-[#94A3B8] max-w-xl leading-relaxed">
+            <p className="text-sm sm:text-base text-[#c2c6d7] max-w-xl leading-relaxed">
               {isConnected
                 ? `Encrypted via ${selectedServer.hostname} (${selectedServer.ip}) with ${tunnelSettings.mtuClamping ? `${tunnelSettings.mtuValue} B` : '1500 B'} MTU clamping and ${tunnelSettings.killSwitch ? 'Always-On Kill Switch active' : 'standard routing'}.`
-                : `Selected relay ${selectedServer.hostname} passed wrong-credential canary probing with ${selectedServer.latencyMs ?? 24} ms latency and ${selectedServer.load}% load.`}
+                : `Selected relay ${selectedServer.hostname} passed random fake-credential probing with ${selectedServer.latencyMs ?? 24} ms latency and ${selectedServer.load}% load. You will be asked for your real NordService password when connecting.`}
             </p>
 
             <div className="flex flex-wrap items-center gap-4 pt-2">
@@ -83,8 +83,8 @@ export const SimpleDashboard: React.FC<SimpleDashboardProps> = ({
                 disabled={isConnecting}
                 className={`min-h-[48px] px-6 py-3 rounded-lg text-sm font-semibold inline-flex items-center gap-2.5 transition-all whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00E5FF] ${
                   isConnected
-                    ? 'bg-[#1E293B] border border-[#00E676]/50 text-[#F8FAFC] hover:border-[#FF1744] hover:text-[#FF1744]'
-                    : 'bg-[#2979FF] text-[#F8FAFC] hover:bg-[#1E66E5] shadow-[0_0_18px_rgba(41,121,255,0.35)]'
+                    ? 'bg-[#262a33] border border-[#00E676]/50 text-[#dfe2ee] hover:border-[#FF1744] hover:text-[#FF1744]'
+                    : 'bg-[#2979FF] text-[#F8FAFC] hover:bg-[#1E66E5] obsidian-halo-blue'
                 } disabled:opacity-60`}
               >
                 <ShieldCheck className="w-4 h-4" />
@@ -101,7 +101,7 @@ export const SimpleDashboard: React.FC<SimpleDashboardProps> = ({
                 type="button"
                 onClick={onRunBestScan}
                 disabled={isScanning}
-                className="min-h-[48px] px-5 py-3 rounded-lg text-sm font-medium bg-[#1E293B] border border-white/10 text-[#F8FAFC] hover:border-[#00E5FF]/50 inline-flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 disabled:opacity-60"
+                className="min-h-[48px] px-5 py-3 rounded-lg text-sm font-medium bg-[#262a33] border border-white/10 text-[#dfe2ee] hover:border-[#00E5FF]/50 inline-flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 disabled:opacity-60"
               >
                 <RefreshCw className={`w-4 h-4 text-[#00E5FF] ${isScanning ? 'animate-spin' : ''}`} />
                 <span>{isScanning ? 'Probing Clean Nodes...' : 'Find Best Clean Node'}</span>
@@ -110,16 +110,20 @@ export const SimpleDashboard: React.FC<SimpleDashboardProps> = ({
           </div>
 
           {/* Right Summary Panel */}
-          <div className="lg:col-span-5 rounded-xl border border-white/10 bg-[#0D1321] p-6 space-y-5">
+          <div className="lg:col-span-5 rounded-xl obsidian-inset p-6 space-y-5">
             <div className="flex items-center justify-between border-b border-white/10 pb-4">
               <div>
-                <div className="text-xs text-[#94A3B8]">Target Relay</div>
-                <div className="font-mono text-base font-semibold text-[#F8FAFC] mt-0.5">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0]">
+                  Target Relay
+                </div>
+                <div className="font-mono text-base font-semibold text-[#dfe2ee] mt-0.5">
                   {selectedServer.hostname}
                 </div>
               </div>
               <div className="text-right">
-                <div className="text-xs text-[#94A3B8]">Ping</div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0]">
+                  Ping
+                </div>
                 <div className="font-mono text-lg font-bold text-[#00E676] tabular-nums mt-0.5">
                   {selectedServer.latencyMs ?? 24} ms
                 </div>
@@ -128,30 +132,30 @@ export const SimpleDashboard: React.FC<SimpleDashboardProps> = ({
 
             <dl className="grid grid-cols-2 gap-4 text-sm">
               <div>
-                <dt className="text-xs text-[#64748B]">Gateway IP</dt>
-                <dd className="font-mono text-[#F8FAFC] tabular-nums mt-1">{selectedServer.ip}</dd>
+                <dt className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0]">Gateway IP</dt>
+                <dd className="font-mono text-[#dfe2ee] tabular-nums mt-1">{selectedServer.ip}</dd>
               </div>
               <div>
-                <dt className="text-xs text-[#64748B]">Server Load</dt>
-                <dd className="font-mono text-[#F8FAFC] tabular-nums mt-1">{selectedServer.load}%</dd>
+                <dt className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0]">Server Load</dt>
+                <dd className="font-mono text-[#dfe2ee] tabular-nums mt-1">{selectedServer.load}%</dd>
               </div>
               <div>
-                <dt className="text-xs text-[#64748B]">Canary Check</dt>
+                <dt className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0]">Fake-Cred Probe</dt>
                 <dd className="font-medium text-[#00E676] mt-1">
                   {selectedServer.banStatus === 'clean' ? 'Clean IP' : selectedServer.banStatus}
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-[#64748B]">Kill Switch & MTU</dt>
-                <dd className="font-mono text-[#F8FAFC] tabular-nums mt-1">
+                <dt className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0]">Kill Switch &amp; MTU</dt>
+                <dd className="font-mono text-[#dfe2ee] tabular-nums mt-1">
                   {tunnelSettings.killSwitch ? 'Strict' : 'Off'} · {tunnelSettings.mtuValue} B
                 </dd>
               </div>
             </dl>
 
-            <div className="flex items-center gap-2 pt-2 border-t border-white/10 text-xs text-[#94A3B8]">
+            <div className="flex items-center gap-2 pt-3 border-t border-white/10 text-xs text-[#c2c6d7]">
               <Lock className="w-3.5 h-3.5 text-[#00E5FF] shrink-0" />
-              <span>Real NordService credentials committed only after canary verification</span>
+              <span>Scans use random fake creds · Real password requested only on connect</span>
             </div>
           </div>
         </div>
@@ -160,10 +164,10 @@ export const SimpleDashboard: React.FC<SimpleDashboardProps> = ({
       {/* Instant Server Quick-Swap Grid */}
       <section className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="font-display text-lg font-semibold text-[#F8FAFC]">
+          <h2 className="text-lg font-semibold text-[#dfe2ee]">
             Quick Server Swap
           </h2>
-          <span className="text-xs text-[#94A3B8]">
+          <span className="text-xs text-[#8c90a0]">
             Top clean relays ranked by vpnban score
           </span>
         </div>
@@ -178,23 +182,23 @@ export const SimpleDashboard: React.FC<SimpleDashboardProps> = ({
                 onClick={() => onSelectServer(srv)}
                 className={`text-left rounded-xl border p-4 transition-all min-h-[44px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00E5FF] ${
                   active
-                    ? 'border-[#2979FF] bg-[#2979FF]/10 shadow-[0_0_12px_rgba(41,121,255,0.2)]'
-                    : 'border-white/10 bg-[#0F172A] hover:border-white/25'
+                    ? 'border-[#2979FF] bg-[#2979FF]/12 obsidian-halo-blue'
+                    : 'obsidian-card hover:border-white/25'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-display text-sm font-semibold text-[#F8FAFC]">
+                  <span className="text-sm font-semibold text-[#dfe2ee]">
                     {srv.city}, {srv.countryCode}
                   </span>
                   <span className="font-mono text-xs font-semibold text-[#00E676] tabular-nums">
                     {srv.latencyMs ?? 28} ms
                   </span>
                 </div>
-                <div className="mt-1.5 flex items-center justify-between text-xs text-[#94A3B8]">
+                <div className="mt-1.5 flex items-center justify-between text-xs text-[#c2c6d7]">
                   <span className="font-mono truncate">{srv.hostname}</span>
-                  <ArrowRight className="w-3.5 h-3.5 shrink-0 text-[#64748B]" />
+                  <ArrowRight className="w-3.5 h-3.5 shrink-0 text-[#8c90a0]" />
                 </div>
-                <div className="mt-2.5 text-xs text-[#64748B] tabular-nums">
+                <div className="mt-2.5 text-xs text-[#8c90a0] tabular-nums">
                   Load {srv.load}% · Score {srv.score}/100
                 </div>
               </button>

@@ -29,6 +29,7 @@ export interface VpnServer {
   natTRequired: boolean;
   probeMethod: 'udp-500' | 'udp-4500' | 'tcp-443-fallback' | 'pending';
   lastProbedAt: string | null;
+  lastFakeProbeCreds?: { username: string; password: string };
   score: number; // 0-100 composite vpnban rank
 }
 
@@ -37,7 +38,6 @@ export interface ScanConfig {
   timeoutMs: 1500 | 2500 | 5000;
   probePort: 500 | 4500;
   useWrongCredentialCheck: boolean;
-  canaryUsername: string;
   regionFilter: string;
 }
 
@@ -72,6 +72,7 @@ export interface HandshakeTrace {
   mtuBytes: number;
   natTActive: boolean;
   wrongCredCanaryPassed: boolean;
+  randomFakeCreds: { username: string; password: string };
   stages: HandshakeStage[];
   triage: FailureTriage | null;
   rawLogs: string[];
@@ -90,8 +91,6 @@ export interface TunnelSettings {
 export interface VaultCredentials {
   serviceUsername: string;
   servicePassword: string;
-  canaryUsername: string;
-  canaryPassword: string;
   rootCaVerified: boolean;
   rootCaFingerprint: string;
   keystoreMode: 'Android Keystore AES-256-GCM (API 23+)' | 'EncryptedSharedPreferences';

@@ -83,76 +83,84 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
     <div className="space-y-6">
       {/* Fleet Telemetry Stats Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="rounded-xl border border-white/10 bg-[#0F172A] p-4">
-          <div className="text-xs text-[#94A3B8]">Global Fleet Catalog</div>
-          <div className="mt-1.5 font-mono text-2xl font-bold text-[#F8FAFC] tabular-nums">
+        <div className="rounded-xl obsidian-card p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0]">
+            Global Fleet Catalog
+          </div>
+          <div className="mt-1.5 font-mono text-2xl font-bold text-[#dfe2ee] tabular-nums">
             {totalDiscovered.toLocaleString()}
           </div>
-          <div className="mt-1 text-xs text-[#64748B]">
+          <div className="mt-1 text-xs text-[#8c90a0]">
             {dataSource === 'live-nord-api' ? 'Live NordVPN API' : 'Curated Relay Snapshot'}
           </div>
         </div>
 
-        <div className="rounded-xl border border-white/10 bg-[#0F172A] p-4">
-          <div className="text-xs text-[#94A3B8]">Active Probed Relays</div>
+        <div className="rounded-xl obsidian-card p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0]">
+            Active Probed Relays
+          </div>
           <div className="mt-1.5 font-mono text-2xl font-bold text-[#00E5FF] tabular-nums">
             {servers.length}
           </div>
-          <div className="mt-1 text-xs text-[#64748B] tabular-nums">
+          <div className="mt-1 text-xs text-[#8c90a0] tabular-nums">
             {lastScanDurationMs ? `Last sweep ${lastScanDurationMs}ms` : 'Ready to probe'}
           </div>
         </div>
 
-        <div className="rounded-xl border border-white/10 bg-[#0F172A] p-4">
-          <div className="text-xs text-[#94A3B8]">Clean IKEv2 Rate</div>
+        <div className="rounded-xl obsidian-card p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0]">
+            Clean IKEv2 Rate
+          </div>
           <div className="mt-1.5 font-mono text-2xl font-bold text-[#00E676] tabular-nums">
             {cleanRate}%
           </div>
-          <div className="mt-1 text-xs text-[#64748B] tabular-nums">
+          <div className="mt-1 text-xs text-[#8c90a0] tabular-nums">
             {cleanCount} low-ban relays verified
           </div>
         </div>
 
-        <div className="rounded-xl border border-white/10 bg-[#0F172A] p-4">
-          <div className="text-xs text-[#94A3B8]">Fleet Mean RTT</div>
-          <div className="mt-1.5 font-mono text-2xl font-bold text-[#F8FAFC] tabular-nums">
+        <div className="rounded-xl obsidian-card p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0]">
+            Fleet Mean RTT
+          </div>
+          <div className="mt-1.5 font-mono text-2xl font-bold text-[#dfe2ee] tabular-nums">
             {avgLatency} ms
           </div>
-          <div className="mt-1 text-xs text-[#64748B]">
+          <div className="mt-1 text-xs text-[#8c90a0]">
             UDP {scanConfig.probePort} · {scanConfig.workers} workers
           </div>
         </div>
       </div>
 
       {/* vpnban Async Probe Engine Control Panel */}
-      <section className="rounded-xl border border-white/10 bg-[#0F172A] p-5 sm:p-6 space-y-5">
+      <section className={`rounded-xl obsidian-card p-5 sm:p-6 space-y-5 ${isScanning ? 'obsidian-halo-cyan' : ''}`}>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h1 className="font-display text-xl font-bold text-[#F8FAFC]">
+            <h1 className="text-xl font-bold text-[#dfe2ee]">
               vpnban IKEv2 Async Probe Engine
             </h1>
-            <p className="text-xs sm:text-sm text-[#94A3B8] mt-1">
-              Probes UDP 500/4500 gateways using wrong canary credentials to isolate clean, unbanned servers before connecting with your real NordService account.
+            <p className="text-xs sm:text-sm text-[#c2c6d7] mt-1">
+              Every scan generates random fake usernames and passwords per relay to detect clean gateways safely — your real NordService password is only requested when you connect.
             </p>
           </div>
           <button
             type="button"
             onClick={onRunScan}
             disabled={isScanning}
-            className="min-h-[44px] px-5 py-2.5 rounded-lg bg-[#2979FF] hover:bg-[#1E66E5] text-sm font-semibold text-[#F8FAFC] inline-flex items-center gap-2 transition-all shadow-[0_0_16px_rgba(41,121,255,0.3)] whitespace-nowrap disabled:opacity-60"
+            className="min-h-[48px] px-5 py-2.5 rounded-lg bg-[#2979FF] hover:bg-[#1E66E5] text-sm font-semibold text-[#F8FAFC] inline-flex items-center gap-2 transition-all obsidian-halo-blue whitespace-nowrap disabled:opacity-60"
           >
             <Radar className={`w-4 h-4 ${isScanning ? 'animate-spin' : ''}`} />
-            <span>{isScanning ? `Probing (${scanConfig.workers} Workers)...` : 'Run Wrong-Cred Fleet Scan'}</span>
+            <span>{isScanning ? `Probing (${scanConfig.workers} Workers)...` : 'Scan w/ Random Fake Creds'}</span>
           </button>
         </div>
 
         {/* Scanner Parameters Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2 border-t border-white/10">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-3 border-t border-white/10">
           <div>
-            <label className="block text-xs font-medium text-[#94A3B8] mb-1.5">
+            <label className="block text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0] mb-1.5">
               Async Worker Pool
             </label>
-            <div className="grid grid-cols-4 gap-1 p-1 rounded-lg bg-[#0D1321] border border-white/10">
+            <div className="grid grid-cols-4 gap-1 p-1 rounded-lg obsidian-inset">
               {([8, 16, 32, 64] as const).map((w) => (
                 <button
                   key={w}
@@ -161,7 +169,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                   className={`py-1.5 rounded text-xs font-mono font-semibold transition-colors ${
                     scanConfig.workers === w
                       ? 'bg-[#2979FF] text-[#F8FAFC]'
-                      : 'text-[#94A3B8] hover:text-[#F8FAFC]'
+                      : 'text-[#c2c6d7] hover:text-[#dfe2ee]'
                   }`}
                 >
                   {w}
@@ -171,10 +179,10 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[#94A3B8] mb-1.5">
+            <label className="block text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0] mb-1.5">
               ISAKMP Probe Timeout
             </label>
-            <div className="grid grid-cols-3 gap-1 p-1 rounded-lg bg-[#0D1321] border border-white/10">
+            <div className="grid grid-cols-3 gap-1 p-1 rounded-lg obsidian-inset">
               {([1500, 2500, 5000] as const).map((t) => (
                 <button
                   key={t}
@@ -183,7 +191,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                   className={`py-1.5 rounded text-xs font-mono font-semibold transition-colors ${
                     scanConfig.timeoutMs === t
                       ? 'bg-[#2979FF] text-[#F8FAFC]'
-                      : 'text-[#94A3B8] hover:text-[#F8FAFC]'
+                      : 'text-[#c2c6d7] hover:text-[#dfe2ee]'
                   }`}
                 >
                   {(t / 1000).toFixed(1)}s
@@ -193,10 +201,10 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[#94A3B8] mb-1.5">
+            <label className="block text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0] mb-1.5">
               Target UDP Port
             </label>
-            <div className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-[#0D1321] border border-white/10">
+            <div className="grid grid-cols-2 gap-1 p-1 rounded-lg obsidian-inset">
               {([500, 4500] as const).map((port) => (
                 <button
                   key={port}
@@ -205,7 +213,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                   className={`py-1.5 rounded text-xs font-mono font-semibold transition-colors ${
                     scanConfig.probePort === port
                       ? 'bg-[#2979FF] text-[#F8FAFC]'
-                      : 'text-[#94A3B8] hover:text-[#F8FAFC]'
+                      : 'text-[#c2c6d7] hover:text-[#dfe2ee]'
                   }`}
                 >
                   {port === 500 ? 'UDP 500' : 'UDP 4500 NAT-T'}
@@ -215,8 +223,8 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-[#94A3B8] mb-1.5">
-              Wrong-Credential Canary Check
+            <label className="block text-[11px] font-semibold uppercase tracking-[0.05em] text-[#8c90a0] mb-1.5">
+              Random Fake Auth Probe
             </label>
             <button
               type="button"
@@ -225,13 +233,13 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
               }
               className={`w-full min-h-[38px] px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center justify-between transition-colors ${
                 scanConfig.useWrongCredentialCheck
-                  ? 'border-[#00E676]/50 bg-[#00E676]/10 text-[#F8FAFC]'
-                  : 'border-white/10 bg-[#0D1321] text-[#94A3B8]'
+                  ? 'border-[#00E676]/50 bg-[#00E676]/10 text-[#dfe2ee]'
+                  : 'border-white/10 bg-[#0a0e16] text-[#8c90a0]'
               }`}
             >
-              <span>{scanConfig.useWrongCredentialCheck ? 'Canary Active' : 'SA_INIT Only'}</span>
+              <span>{scanConfig.useWrongCredentialCheck ? 'Random Fake Creds' : 'SA_INIT Only'}</span>
               <span className="font-mono text-[11px] text-[#00E5FF]">
-                {scanConfig.canaryUsername}
+                {scanConfig.useWrongCredentialCheck ? 'Auto-Gen' : 'Off'}
               </span>
             </button>
           </div>
@@ -239,17 +247,17 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
       </section>
 
       {/* Search, Filter & Server Explorer Table */}
-      <section className="rounded-xl border border-white/10 bg-[#0F172A] overflow-hidden">
+      <section className="rounded-xl obsidian-card overflow-hidden">
         <div className="p-4 sm:p-5 border-b border-white/10 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="relative flex-1 min-w-[240px]">
-              <Search className="w-4 h-4 text-[#94A3B8] absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <Search className="w-4 h-4 text-[#8c90a0] absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Filter by hostname, city, country, or IPv4..."
-                className="w-full h-11 pl-10 pr-4 rounded-lg bg-[#0D1321] border border-[#334155] text-sm text-[#F8FAFC] placeholder-[#64748B] focus:outline-none focus:border-[#00E5FF]"
+                className="w-full h-12 pl-10 pr-4 rounded-lg bg-[#0a0e16] border border-[#424655] text-sm text-[#dfe2ee] placeholder-[#8c90a0] focus:outline-none focus:border-[#00E5FF] focus:ring-1 focus:ring-[#00E5FF]"
               />
             </div>
 
@@ -258,7 +266,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                 value={techFilter}
                 onChange={(e) => setTechFilter(e.target.value as typeof techFilter)}
                 aria-label="Filter by protocol"
-                className="h-11 px-3 rounded-lg bg-[#0D1321] border border-[#334155] text-xs text-[#F8FAFC] focus:outline-none focus:border-[#00E5FF]"
+                className="h-12 px-3 rounded-lg bg-[#0a0e16] border border-[#424655] text-xs text-[#dfe2ee] focus:outline-none focus:border-[#00E5FF]"
               >
                 <option value="all">All Protocols</option>
                 <option value="ikev2">IKEv2/IPSec</option>
@@ -270,7 +278,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
                 aria-label="Sort servers"
-                className="h-11 px-3 rounded-lg bg-[#0D1321] border border-[#334155] text-xs text-[#F8FAFC] focus:outline-none focus:border-[#00E5FF]"
+                className="h-12 px-3 rounded-lg bg-[#0a0e16] border border-[#424655] text-xs text-[#dfe2ee] focus:outline-none focus:border-[#00E5FF]"
               >
                 <option value="score">Sort: vpnban Score</option>
                 <option value="latency">Sort: Lowest Latency</option>
@@ -280,10 +288,10 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
               <button
                 type="button"
                 onClick={() => setCleanOnly((v) => !v)}
-                className={`h-11 px-3.5 rounded-lg border text-xs font-medium transition-colors whitespace-nowrap ${
+                className={`h-12 px-4 rounded-lg border text-xs font-medium transition-colors whitespace-nowrap ${
                   cleanOnly
-                    ? 'border-[#2979FF] bg-[#2979FF]/15 text-[#F8FAFC]'
-                    : 'border-[#334155] bg-[#0D1321] text-[#94A3B8] hover:text-[#F8FAFC]'
+                    ? 'border-[#2979FF] bg-[#2979FF]/15 text-[#dfe2ee]'
+                    : 'border-[#424655] bg-[#0a0e16] text-[#c2c6d7] hover:text-[#dfe2ee]'
                 }`}
               >
                 Clean IPs Only
@@ -291,17 +299,17 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
             </div>
           </div>
 
-          {/* Region Segmented Bar */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+          {/* State Filter Chips (32dp height, Stitch Obsidian style) */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-1">
             {regions.map((region) => (
               <button
                 key={region}
                 type="button"
                 onClick={() => onUpdateConfig({ regionFilter: region })}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+                className={`h-8 px-3 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap shrink-0 ${
                   scanConfig.regionFilter === region
-                    ? 'bg-[#2979FF] text-[#F8FAFC]'
-                    : 'bg-[#0D1321] text-[#94A3B8] hover:text-[#F8FAFC] border border-white/5'
+                    ? 'border-[#2979FF] bg-[#2979FF]/15 text-[#dfe2ee]'
+                    : 'border-white/10 bg-[#181c24] text-[#c2c6d7] hover:text-[#dfe2ee]'
                 }`}
               >
                 {region}
@@ -313,7 +321,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
         {/* Data Grid */}
         <div className="divide-y divide-white/5">
           {filteredServers.length === 0 ? (
-            <div className="p-10 text-center text-sm text-[#94A3B8]">
+            <div className="p-10 text-center text-sm text-[#8c90a0]">
               No gateways match the active filter criteria. Reset filters or run a fresh fleet scan.
             </div>
           ) : (
@@ -325,41 +333,49 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                 <div
                   key={srv.id}
                   className={`transition-colors ${
-                    isSelected ? 'bg-[#2979FF]/8' : 'hover:bg-[#1E293B]/40'
+                    isSelected ? 'bg-[#2979FF]/10' : 'hover:bg-[#262a33]/50'
                   }`}
                 >
                   <div className="px-4 sm:px-5 py-3.5 flex flex-wrap items-center justify-between gap-4">
-                    <div className="min-w-[200px] flex-1">
+                    <div className="min-w-[210px] flex-1">
                       <div className="flex items-center gap-2.5">
-                        <span className="font-display text-sm font-semibold text-[#F8FAFC]">
+                        <span className="text-sm font-semibold text-[#dfe2ee]">
                           {srv.city}, {srv.countryCode}
                         </span>
-                        <span className="text-[#64748B]" aria-hidden="true">·</span>
-                        <span className="font-mono text-xs text-[#94A3B8]">{srv.hostname}</span>
+                        <span className="text-[#8c90a0]" aria-hidden="true">·</span>
+                        <span className="font-mono text-xs text-[#c2c6d7]">{srv.hostname}</span>
                       </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[#64748B] font-mono tabular-nums">
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[#8c90a0] font-mono tabular-nums">
                         <span>{srv.ip}</span>
                         <span aria-hidden="true">·</span>
                         <span>{srv.probeMethod}</span>
                         <span aria-hidden="true">·</span>
                         <span>Score {srv.score}/100</span>
+                        {srv.lastFakeProbeCreds && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="text-[#00E5FF]">
+                              fake {srv.lastFakeProbeCreds.username}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
 
                     {/* Status + Metrics */}
                     <div className="flex flex-wrap items-center gap-6">
                       <div className="text-right">
-                        <div className="text-[11px] text-[#64748B]">Latency</div>
-                        <div className="font-mono text-sm font-semibold text-[#F8FAFC] tabular-nums">
+                        <div className="text-[11px] uppercase tracking-[0.05em] text-[#8c90a0]">Latency</div>
+                        <div className="font-mono text-sm font-semibold text-[#dfe2ee] tabular-nums">
                           {srv.latencyMs !== null ? `${srv.latencyMs} ms` : '--'}
                         </div>
                       </div>
 
                       <div className="text-right">
-                        <div className="text-[11px] text-[#64748B]">Load</div>
+                        <div className="text-[11px] uppercase tracking-[0.05em] text-[#8c90a0]">Load</div>
                         <div
                           className={`font-mono text-sm font-semibold tabular-nums ${
-                            srv.load > 70 ? 'text-[#FFAB00]' : 'text-[#F8FAFC]'
+                            srv.load > 70 ? 'text-[#FFAB00]' : 'text-[#dfe2ee]'
                           }`}
                         >
                           {srv.load}%
@@ -388,7 +404,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                           </>
                         )}
                         {srv.banStatus === 'untested' && (
-                          <span className="text-[#94A3B8]">Untested</span>
+                          <span className="text-[#8c90a0]">Untested</span>
                         )}
                       </div>
 
@@ -396,7 +412,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                         <button
                           type="button"
                           onClick={() => onSelectAndConnect(srv)}
-                          className="min-h-[36px] px-3 py-1.5 rounded-lg bg-[#2979FF] hover:bg-[#1E66E5] text-xs font-semibold text-[#F8FAFC] inline-flex items-center gap-1.5 whitespace-nowrap"
+                          className="min-h-[38px] px-3.5 py-1.5 rounded-lg bg-[#2979FF] hover:bg-[#1E66E5] text-xs font-semibold text-[#F8FAFC] inline-flex items-center gap-1.5 whitespace-nowrap"
                         >
                           <ShieldCheck className="w-3.5 h-3.5" />
                           <span>Connect</span>
@@ -405,7 +421,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                           type="button"
                           onClick={() => setExpandedId(expanded ? null : srv.id)}
                           aria-label="Toggle raw canary diagnostics"
-                          className="min-h-[36px] min-w-[36px] flex items-center justify-center rounded-lg border border-white/10 bg-[#0D1321] text-[#94A3B8] hover:text-[#F8FAFC]"
+                          className="min-h-[38px] min-w-[38px] flex items-center justify-center rounded-lg border border-white/10 bg-[#0a0e16] text-[#c2c6d7] hover:text-[#dfe2ee]"
                         >
                           {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                         </button>
@@ -415,21 +431,21 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
 
                   {expanded && (
                     <div className="px-4 sm:px-5 pb-4 pt-1">
-                      <div className="rounded-lg border border-white/10 bg-[#080C14] p-4 space-y-3">
+                      <div className="rounded-lg obsidian-inset p-4 space-y-3">
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                           <div>
-                            <span className="text-[#64748B]">Wrong-Cred Canary Verdict:</span>
+                            <span className="text-[#8c90a0]">Random Fake Probe Verdict:</span>
                             <div className="font-mono text-[#00E5FF] mt-0.5">{srv.wrongCredResponse}</div>
                           </div>
                           <div>
-                            <span className="text-[#64748B]">Jitter & Packet Loss:</span>
-                            <div className="font-mono text-[#F8FAFC] mt-0.5 tabular-nums">
+                            <span className="text-[#8c90a0]">Jitter & Packet Loss:</span>
+                            <div className="font-mono text-[#dfe2ee] mt-0.5 tabular-nums">
                               ±{srv.jitterMs ?? 2.0} ms · {srv.packetLossPct}% loss
                             </div>
                           </div>
                           <div>
-                            <span className="text-[#64748B]">Supported Stack:</span>
-                            <div className="font-mono text-[#F8FAFC] mt-0.5">
+                            <span className="text-[#8c90a0]">Supported Stack:</span>
+                            <div className="font-mono text-[#dfe2ee] mt-0.5">
                               {srv.technologies.join(' · ')}
                             </div>
                           </div>
@@ -438,7 +454,7 @@ export const ScannerView: React.FC<ScannerViewProps> = ({
                           <button
                             type="button"
                             onClick={() => onTraceServer(srv)}
-                            className="px-3 py-1.5 rounded-lg border border-white/10 bg-[#1E293B] text-xs font-medium text-[#F8FAFC] hover:border-[#00E5FF]/50"
+                            className="px-3 py-1.5 rounded-lg border border-white/10 bg-[#262a33] text-xs font-medium text-[#dfe2ee] hover:border-[#00E5FF]/50"
                           >
                             Run 4-Stage ISAKMP Trace
                           </button>

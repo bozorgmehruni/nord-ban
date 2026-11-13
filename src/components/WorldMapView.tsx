@@ -53,7 +53,6 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
   const [activeRegion, setActiveRegion] = useState<string>('All');
   const [drawerOpen, setDrawerOpen] = useState(true);
 
-  // Client approximate anchor (New York / Atlantic)
   const originPoint = projectCoords(40.71, -74.0);
   const selectedPoint = projectCoords(selectedServer.lat, selectedServer.lon);
 
@@ -86,24 +85,24 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
       {/* Regional Cluster Filter Strip */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="font-display text-xl font-bold text-[#F8FAFC]">
+          <h1 className="text-xl font-bold text-[#dfe2ee]">
             Global Relay Cartography
           </h1>
-          <p className="text-xs text-[#94A3B8] mt-0.5">
-            Select any cluster pin to inspect vpnban status, latency, and trigger a direct IKEv2 tunnel
+          <p className="text-xs text-[#c2c6d7] mt-0.5">
+            Select any cluster pin to inspect vpnban random fake-probe status, latency, and connect with your real NordService password
           </p>
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
           {['All', ...regionalClusters.map((c) => c.region)].map((region) => (
             <button
               key={region}
               type="button"
               onClick={() => setActiveRegion(region)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
+              className={`h-8 px-3 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap shrink-0 ${
                 activeRegion === region
-                  ? 'bg-[#2979FF] text-[#F8FAFC]'
-                  : 'bg-[#0F172A] border border-white/10 text-[#94A3B8] hover:text-[#F8FAFC]'
+                  ? 'border-[#2979FF] bg-[#2979FF]/15 text-[#dfe2ee]'
+                  : 'bg-[#181c24] border-white/10 text-[#c2c6d7] hover:text-[#dfe2ee]'
               }`}
             >
               {region}
@@ -114,7 +113,7 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Vector Mercator Map Canvas */}
-        <div className="lg:col-span-8 rounded-2xl border border-white/10 bg-[#0D1321] p-4 sm:p-5 relative overflow-hidden">
+        <div className="lg:col-span-8 rounded-2xl obsidian-inset p-4 sm:p-5 relative overflow-hidden">
           <svg
             viewBox="0 0 1000 500"
             className="w-full h-auto select-none"
@@ -134,8 +133,8 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
               <path
                 key={idx}
                 d={d}
-                fill="#182235"
-                stroke="#2D3E5E"
+                fill="#181c24"
+                stroke="#31353e"
                 strokeWidth="1.2"
                 strokeLinejoin="round"
               />
@@ -152,7 +151,7 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
             />
 
             {/* Client Origin Pin */}
-            <circle cx={originPoint.x} cy={originPoint.y} r="4.5" fill="#F8FAFC" />
+            <circle cx={originPoint.x} cy={originPoint.y} r="4.5" fill="#dfe2ee" />
 
             {/* Server Nodes */}
             {visibleServers.map((srv) => {
@@ -192,14 +191,14 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
                     cy={y}
                     r={isSelected ? 6.5 : 4.5}
                     fill={pinColor}
-                    stroke="#080C14"
+                    stroke="#0a0e16"
                     strokeWidth="1.5"
                   />
                   {isSelected && (
                     <text
                       x={x + 10}
                       y={y + 4}
-                      fill="#F8FAFC"
+                      fill="#dfe2ee"
                       fontSize="11"
                       fontFamily="JetBrains Mono, monospace"
                     >
@@ -212,7 +211,7 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
           </svg>
 
           {/* Map Legend */}
-          <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-3 text-xs text-[#94A3B8]">
+          <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap items-center justify-between gap-3 text-xs text-[#c2c6d7]">
             <div className="flex flex-wrap items-center gap-4">
               <span className="inline-flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-full bg-[#00E676]" />
@@ -231,7 +230,7 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
                 Selected Relay
               </span>
             </div>
-            <span className="font-mono tabular-nums">
+            <span className="font-mono tabular-nums text-[#8c90a0]">
               {visibleServers.length} plotted gateways
             </span>
           </div>
@@ -240,14 +239,16 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
         {/* Contextual Cluster & Relay Drawer */}
         <div className="lg:col-span-4 space-y-4">
           {drawerOpen && (
-            <div className="rounded-2xl border border-white/10 bg-[#0F172A] p-5 space-y-4">
+            <div className="rounded-2xl obsidian-card p-5 space-y-4">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <div className="text-xs text-[#00E5FF] font-medium">{selectedServer.region}</div>
-                  <h2 className="font-display text-lg font-bold text-[#F8FAFC] mt-0.5">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.05em] text-[#00E5FF]">
+                    {selectedServer.region}
+                  </div>
+                  <h2 className="text-lg font-bold text-[#dfe2ee] mt-0.5">
                     {selectedServer.city}, {selectedServer.country}
                   </h2>
-                  <div className="font-mono text-xs text-[#94A3B8] mt-0.5">
+                  <div className="font-mono text-xs text-[#c2c6d7] mt-0.5">
                     {selectedServer.hostname} · {selectedServer.ip}
                   </div>
                 </div>
@@ -255,40 +256,40 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
                   type="button"
                   onClick={() => setDrawerOpen(false)}
                   aria-label="Close relay details"
-                  className="p-1.5 rounded-lg text-[#94A3B8] hover:text-[#F8FAFC] hover:bg-[#1E293B]"
+                  className="p-1.5 rounded-lg text-[#c2c6d7] hover:text-[#dfe2ee] hover:bg-[#262a33]"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <dl className="grid grid-cols-2 gap-3 rounded-xl border border-white/5 bg-[#0D1321] p-3.5 text-xs">
+              <dl className="grid grid-cols-2 gap-3 rounded-xl obsidian-inset p-3.5 text-xs">
                 <div>
-                  <dt className="text-[#64748B]">RTT Ping</dt>
+                  <dt className="text-[#8c90a0]">RTT Ping</dt>
                   <dd className="font-mono text-sm font-semibold text-[#00E676] tabular-nums mt-0.5">
                     {selectedServer.latencyMs ?? 24} ms
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-[#64748B]">Server Load</dt>
-                  <dd className="font-mono text-sm font-semibold text-[#F8FAFC] tabular-nums mt-0.5">
+                  <dt className="text-[#8c90a0]">Server Load</dt>
+                  <dd className="font-mono text-sm font-semibold text-[#dfe2ee] tabular-nums mt-0.5">
                     {selectedServer.load}%
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-[#64748B]">vpnban Score</dt>
+                  <dt className="text-[#8c90a0]">vpnban Score</dt>
                   <dd className="font-mono text-sm font-semibold text-[#00E5FF] tabular-nums mt-0.5">
                     {selectedServer.score}/100
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-[#64748B]">Canary Status</dt>
-                  <dd className="font-medium text-[#F8FAFC] mt-0.5 capitalize">
+                  <dt className="text-[#8c90a0]">Fake-Probe Status</dt>
+                  <dd className="font-medium text-[#dfe2ee] mt-0.5 capitalize">
                     {selectedServer.banStatus}
                   </dd>
                 </div>
               </dl>
 
-              <div className="text-xs text-[#94A3B8] font-mono bg-[#080C14] border border-white/5 rounded-lg p-3">
+              <div className="text-xs text-[#c2c6d7] font-mono obsidian-inset rounded-lg p-3">
                 {selectedServer.wrongCredResponse}
               </div>
 
@@ -296,7 +297,7 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
                 <button
                   type="button"
                   onClick={() => onConnectServer(selectedServer)}
-                  className="min-h-[44px] px-3 py-2 rounded-lg bg-[#2979FF] hover:bg-[#1E66E5] text-xs font-semibold text-[#F8FAFC] inline-flex items-center justify-center gap-1.5"
+                  className="min-h-[44px] px-3 py-2 rounded-lg bg-[#2979FF] hover:bg-[#1E66E5] text-xs font-semibold text-[#F8FAFC] inline-flex items-center justify-center gap-1.5 obsidian-halo-blue"
                 >
                   <ShieldCheck className="w-4 h-4" />
                   <span>Connect Relay</span>
@@ -304,7 +305,7 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
                 <button
                   type="button"
                   onClick={() => onTraceServer(selectedServer)}
-                  className="min-h-[44px] px-3 py-2 rounded-lg bg-[#1E293B] border border-white/10 hover:border-[#00E5FF]/50 text-xs font-medium text-[#F8FAFC] inline-flex items-center justify-center gap-1.5"
+                  className="min-h-[44px] px-3 py-2 rounded-lg bg-[#262a33] border border-white/10 hover:border-[#00E5FF]/50 text-xs font-medium text-[#dfe2ee] inline-flex items-center justify-center gap-1.5"
                 >
                   <Activity className="w-4 h-4 text-[#00E5FF]" />
                   <span>Trace Path</span>
@@ -314,8 +315,8 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
           )}
 
           {/* Regional Cluster Density Cards */}
-          <div className="rounded-2xl border border-white/10 bg-[#0F172A] p-5 space-y-3">
-            <h3 className="font-display text-sm font-semibold text-[#F8FAFC]">
+          <div className="rounded-2xl obsidian-card p-5 space-y-3">
+            <h3 className="text-sm font-semibold text-[#dfe2ee]">
               Regional Cluster Health
             </h3>
             <div className="divide-y divide-white/5">
@@ -324,11 +325,11 @@ export const WorldMapView: React.FC<WorldMapViewProps> = ({
                   key={c.region}
                   type="button"
                   onClick={() => setActiveRegion(c.region)}
-                  className="w-full py-2.5 flex items-center justify-between text-left hover:bg-[#1E293B]/30 px-2 rounded transition-colors"
+                  className="w-full py-2.5 flex items-center justify-between text-left hover:bg-[#262a33]/60 px-2 rounded transition-colors"
                 >
                   <div>
-                    <div className="text-xs font-medium text-[#F8FAFC]">{c.region}</div>
-                    <div className="text-[11px] text-[#64748B] tabular-nums">
+                    <div className="text-xs font-medium text-[#dfe2ee]">{c.region}</div>
+                    <div className="text-[11px] text-[#8c90a0] tabular-nums">
                       {c.clean}/{c.count} clean nodes
                     </div>
                   </div>

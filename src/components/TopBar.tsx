@@ -1,5 +1,6 @@
 import React from 'react';
 import { Activity, Globe, Radar, ShieldCheck, KeyRound } from 'lucide-react';
+import appIconImg from '../assets/images/nord_ikev2_icon_1794572187702.jpg';
 import type { NavTab } from '../types/vpn';
 
 interface TopBarProps {
@@ -29,16 +30,22 @@ export const TopBar: React.FC<TopBarProps> = ({
     <>
       <header className="sticky top-0 z-40 border-b border-white/10 bg-[#080C14]/95 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-8 px-4 sm:px-6">
-          {/* Zone 1: Single text element Brand Wordmark */}
+          {/* Zone 1: Brand Wordmark + App Icon */}
           <a
             href="#dashboard"
             onClick={(e) => {
               e.preventDefault();
               onSelectTab('dashboard');
             }}
-            className="font-display text-base sm:text-lg font-bold tracking-tight text-[#F8FAFC] whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-2.5 text-base sm:text-lg font-bold tracking-tight text-[#dfe2ee] whitespace-nowrap shrink-0"
           >
-            NordVPN IKEv2 Explorer
+            <img
+              src={appIconImg}
+              alt="NordVPN IKEv2 Explorer"
+              referrerPolicy="no-referrer"
+              className="w-7 h-7 rounded-lg border border-white/15 object-cover shrink-0"
+            />
+            <span>NordVPN IKEv2 Explorer</span>
           </a>
 
           {/* Zone 2: 5 concise single-line text navigation links */}
@@ -51,7 +58,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                   type="button"
                   onClick={() => onSelectTab(item.id)}
                   className={`relative py-2 text-sm font-medium transition-colors whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00E5FF] rounded ${
-                    active ? 'text-[#F8FAFC]' : 'text-[#94A3B8] hover:text-[#F8FAFC]'
+                    active ? 'text-[#dfe2ee]' : 'text-[#8c90a0] hover:text-[#dfe2ee]'
                   }`}
                 >
                   {item.label}
@@ -69,10 +76,10 @@ export const TopBar: React.FC<TopBarProps> = ({
               type="button"
               onClick={onPrimaryConnectAction}
               disabled={isConnecting}
-              className={`min-h-[40px] px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00E5FF] ${
+              className={`min-h-[42px] px-4 py-2 text-xs sm:text-sm font-semibold rounded-lg transition-all whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#00E5FF] ${
                 isConnected
-                  ? 'bg-[#1E293B] text-[#F8FAFC] border border-[#00E676]/50 hover:border-[#FF1744]/70 hover:text-[#FF1744]'
-                  : 'bg-[#2979FF] text-[#F8FAFC] hover:bg-[#1E66E5] shadow-[0_0_14px_rgba(41,121,255,0.3)]'
+                  ? 'bg-[#262a33] text-[#dfe2ee] border border-[#00E676]/50 hover:border-[#FF1744]/70 hover:text-[#FF1744]'
+                  : 'bg-[#2979FF] text-[#F8FAFC] hover:bg-[#1E66E5] obsidian-halo-blue'
               } disabled:opacity-60`}
             >
               {isConnecting ? 'Negotiating...' : isConnected ? 'Disconnect' : 'Quick Connect'}
@@ -81,7 +88,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
       </header>
 
-      {/* Mobile Bottom Navigation Bar (under 15% sticky height cap) */}
+      {/* Mobile Bottom Navigation Bar (Stitch 64dp #080C14 bar with Electric Cyan active pill) */}
       <nav
         aria-label="Mobile Navigation"
         className="lg:hidden fixed bottom-0 left-0 right-0 z-40 h-16 border-t border-white/10 bg-[#080C14]/95 backdrop-blur-md grid grid-cols-5 items-center"
@@ -95,11 +102,17 @@ export const TopBar: React.FC<TopBarProps> = ({
               type="button"
               onClick={() => onSelectTab(item.id)}
               className={`flex flex-col items-center justify-center min-h-[44px] px-1 transition-colors ${
-                active ? 'text-[#00E5FF]' : 'text-[#94A3B8]'
+                active ? 'text-[#dfe2ee]' : 'text-[#8c90a0]'
               }`}
             >
-              <Icon className="w-5 h-5" />
-              <span className="mt-1 text-[10px] font-medium whitespace-nowrap truncate max-w-full">
+              <span
+                className={`px-3 py-1 rounded-full transition-colors ${
+                  active ? 'bg-[#00E5FF]/20 text-[#00E5FF]' : ''
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+              </span>
+              <span className="mt-0.5 text-[10px] font-semibold tracking-[0.03em] whitespace-nowrap truncate max-w-full">
                 {item.label}
               </span>
             </button>
