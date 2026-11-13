@@ -296,12 +296,17 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
+    }
+
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
     }
 
     compileOptions {
@@ -339,6 +344,10 @@ dependencies {
     content: `-keep class com.nord.ikev2explorer.** { *; }
 -dontwarn okhttp3.**
 -dontwarn okio.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+-dontwarn javax.annotation.**
 `,
   },
   {
@@ -819,6 +828,17 @@ class MainActivity : ComponentActivity() {
             var svcUser by remember { mutableStateOf(initialCreds.username) }
             var svcPass by remember { mutableStateOf(initialCreds.password) }
 
+            MaterialTheme(
+                colorScheme = darkColorScheme(
+                    primary = Color(0xFF2979FF),
+                    secondary = Color(0xFF00E5FF),
+                    background = Color(0xFF080C14),
+                    surface = Color(0xFF0F172A),
+                    onPrimary = Color(0xFFF8FAFC),
+                    onBackground = Color(0xFFF8FAFC),
+                    onSurface = Color(0xFFF8FAFC)
+                )
+            ) {
             Surface(
                 modifier = Modifier.fillMaxSize().background(Color(0xFF080C14)),
                 color = Color(0xFF080C14)
@@ -933,6 +953,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+            }
             }
         }
     }

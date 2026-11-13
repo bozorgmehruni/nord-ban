@@ -1,4 +1,4 @@
-name: CI/CD Web & Android Bundle
+name: CI/CD Web & Android 6.0+ APK
 
 on:
   push:
@@ -25,14 +25,95 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
-      - run: npm ci
+      - run: npm install
       - run: npm run lint
       - run: npm run build
 
+  build-android-apk:
+    name: Build & Sign Android 6.0+ APK (API 23-35)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Node tooling & materialize Android 6.0+ project
+        run: |
+          npm install
+          npx tsx scripts/export-android-project.ts android-project nordvpn-ikev2-explorer-android6-plus.zip
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Run Android Lint & Build Debug/Release APKs (minSdk 23)
+        working-directory: android-project
+        run: gradle lintDebug assembleDebug assembleRelease
+
+      - name: Sign Release APK & Verify
+        run: |
+          KEYSTORE_PATH="${{ runner.temp }}/release.jks"
+          if [ -n "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$KEYSTORE_PATH"
+            KS_PASS="${{ secrets.ANDROID_KEYSTORE_PASS }}"
+            KS_ALIAS="${{ secrets.ANDROID_KEYSTORE_ALIAS }}"
+            KEY_PASS="${{ secrets.ANDROID_KEY_PASS }}"
+          else
+            keytool -genkeypair -v -keystore "$KEYSTORE_PATH" -storetype PKCS12 \
+              -alias nordrelease -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass nordexplorer123 -keypass nordexplorer123 \
+              -dname "CN=NordVPN IKEv2 Explorer, O=Obsidian Telemetry, C=US"
+            KS_PASS="nordexplorer123"
+            KS_ALIAS="nordrelease"
+            KEY_PASS="nordexplorer123"
+          fi
+
+          mkdir -p dist-apk
+          cp android-project/app/build/outputs/apk/debug/app-debug.apk \
+            dist-apk/nordvpn-ikev2-explorer-android6plus-debug.apk
+
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -n 1)"
+          "$APKSIGNER" sign --ks "$KEYSTORE_PATH" --ks-key-alias "$KS_ALIAS" \
+            --ks-pass "pass:${KS_PASS}" --key-pass "pass:${KEY_PASS}" \
+            --out dist-apk/nordvpn-ikev2-explorer-android6plus-release.apk \
+            android-project/app/build/outputs/apk/release/app-release-unsigned.apk
+
+          "$APKSIGNER" verify dist-apk/nordvpn-ikev2-explorer-android6plus-release.apk
+          cp nordvpn-ikev2-explorer-android6-plus.zip dist-apk/
+          (cd dist-apk && sha256sum *.apk *.zip > SHA256SUMS.txt)
+
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nordvpn-ikev2-explorer-android6plus-debug-apk
+          path: dist-apk/nordvpn-ikev2-explorer-android6plus-debug.apk
+
+      - name: Upload Signed Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nordvpn-ikev2-explorer-android6plus-release-apk
+          path: dist-apk/nordvpn-ikev2-explorer-android6plus-release.apk
+
+      - name: Upload Full Release Bundle Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: dist-apk/
+
   release-tag:
-    name: Create Tag & GitHub Release
-    needs: verify-web-app
+    name: Create Tag & Publish APK Release
+    needs: [ verify-web-app, build-android-apk ]
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -40,41 +121,45 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Determine Release Tag
+      - name: Resolve or Create Git Tag
         id: meta
         run: |
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG="${GITHUB_REF#refs/tags/}"
           else
             TAG="${{ github.event.inputs.release_tag }}"
+            if [ -z "$TAG" ]; then TAG="v1.0.0"; fi
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$TAG" -m "Release $TAG"
-            git push origin "$TAG"
+            if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+              git tag -a "$TAG" -m "Release $TAG"
+              git push origin "$TAG"
+            fi
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Package Web Dist & Android Project Bundle
+      - name: Download Built APK Bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+          path: release-assets
+
+      - name: Rename Versioned APKs
         run: |
-          npm ci
-          npm run build
-          npx tsx -e "
-            import fs from 'node:fs';
-            import JSZip from 'jszip';
-            import { ANDROID_PROJECT_FILES } from './src/data/androidProjectTemplate.js';
-            const zip = new JSZip();
-            for (const f of ANDROID_PROJECT_FILES) zip.file(f.path, f.content);
-            const buf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
-            fs.writeFileSync('nordvpn-ikev2-explorer-android6-plus.zip', buf);
-          "
-          sha256sum nordvpn-ikev2-explorer-android6-plus.zip > SHA256SUMS.txt
+          TAG="${{ steps.meta.outputs.tag }}"
+          mv release-assets/nordvpn-ikev2-explorer-android6plus-debug.apk \
+             "release-assets/nordvpn-ikev2-explorer-${TAG}-android6plus-debug.apk"
+          mv release-assets/nordvpn-ikev2-explorer-android6plus-release.apk \
+             "release-assets/nordvpn-ikev2-explorer-${TAG}-android6plus-release.apk"
+          (cd release-assets && sha256sum *.apk *.zip > SHA256SUMS.txt)
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
-          name: "NordVPN IKEv2 Explorer ${{ steps.meta.outputs.tag }}"
+          name: "NordVPN IKEv2 Explorer ${{ steps.meta.outputs.tag }} (Android 6.0+)"
           generate_release_notes: true
           files: |
-            nordvpn-ikev2-explorer-android6-plus.zip
-            SHA256SUMS.txt
+            release-assets/*.apk
+            release-assets/*.zip
+            release-assets/SHA256SUMS.txt
